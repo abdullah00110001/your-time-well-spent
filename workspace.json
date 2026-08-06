@@ -1,0 +1,32 @@
+{
+  "modules": [],
+  "libraries": [
+    {
+      "name": "jdk-stubs",
+      "type": "COMPILE",
+      "roots": [
+        {
+          "path": "/home/lsp/jdk-stubs.jar",
+          "type": "CLASSES"
+        }
+      ]
+    }
+  ],
+  "sdks": [
+    {
+      "name": "17",
+      "type": "jdk",
+      "version": "JDK_17",
+      "homePath": "/opt/temurin/current",
+      "roots": [
+        {
+          "url": "jar:///home/lsp/jdk-stubs.jar!/",
+          "type": "CLASSES"
+        }
+      ],
+      "additionalData": ""
+    }
+  ],
+  "kotlinSettings": [],
+  "javaSettings": []
+}

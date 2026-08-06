@@ -1,0 +1,2256 @@
+
+
+=== FILE: src/lib/capacitor/permissions.ts ===
+import { LocalNotifications } from '@capacitor/local-notifications';
+import { PushNotifications } from '@capacitor/push-notifications';
+import { isNative, isAndroid } from './platform';
+import Shield from './shieldPlugin';
+import { canScheduleExactAlarms, openExactAlarmSettings } from './riseAlarmBridge';
+
+export type PermissionStatus = 'granted' | 'denied' | 'prompt';
+
+export interface PermissionState {
+  notifications: PermissionStatus;
+  exactAlarm: PermissionStatus;
+  usageStats: PermissionStatus;
+  overlay: PermissionStatus;
+  battery: PermissionStatus;
+  accessibility: PermissionStatus;
+}
+
+// Check notification permission
+export const checkNotificationPermission = async (): Promise<PermissionStatus> => {
+  if (!isNative) {
+    if ('Notification' in window) {
+      return Notification.permission as PermissionStatus;
+    }
+    return 'denied';
+  }
+
+  try {
+    const { display } = await LocalNotifications.checkPermissions();
+    return display as PermissionStatus;
+  } catch {
+    return 'denied';
+  }
+};
+
+// Request notification permission with pre-explanation
+export const requestNotificationPermission = async (
+  onPreExplanation?: () => Promise<boolean>
+): Promise<PermissionStatus> => {
+  if (onPreExplanation) {
+    const proceed = await onPreExplanation();
+    if (!proceed) return 'denied';
+  }
+
+  if (!isNative) {
+    if ('Notification' in window) {
+      const result = await Notification.requestPermission();
+      return result as PermissionStatus;
+    }
+    return 'denied';
+  }
+
+  try {
+    const { display } = await LocalNotifications.requestPermissions();
+    return display as PermissionStatus;
+  } catch {
+    return 'denied';
+  }
+};
+
+// Check push notification permission
+export const checkPushPermission = async (): Promise<PermissionStatus> => {
+  if (!isNative) return 'denied';
+
+  try {
+    const { receive } = await PushNotifications.checkPermissions();
+    return receive as PermissionStatus;
+  } catch {
+    return 'denied';
+  }
+};
+
+// Request push notification permission
+export const requestPushPermission = async (): Promise<PermissionStatus> => {
+  if (!isNative) return 'denied';
+
+  try {
+    const { receive } = await PushNotifications.requestPermissions();
+    
+    if (receive === 'granted') {
+      await PushNotifications.register();
+    }
+    
+    return receive as PermissionStatus;
+  } catch {
+    return 'denied';
+  }
+};
+
+// Android-specific: Check exact alarm permission (API 31+)
+export const checkExactAlarmPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    const ok = await canScheduleExactAlarms();
+    return ok ? 'granted' : 'prompt';
+  } catch {
+    return 'prompt';
+  }
+};
+
+// Android-specific: Open the system "Alarms & reminders" page for this app
+export const requestExactAlarmPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    await openExactAlarmSettings();
+  } catch (e) {
+    console.warn('[Permissions] openExactAlarmSettings failed', e);
+  }
+  return checkExactAlarmPermission();
+};
+
+// Android-specific: Check usage stats permission (for Shield) — uses native AppOps check
+export const checkUsageStatsPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'denied';
+  try {
+    const { usageStats } = await Shield.checkPermissions();
+    return usageStats ? 'granted' : 'prompt';
+  } catch {
+    return 'prompt';
+  }
+};
+
+// Android-specific: Request usage stats permission
+export const requestUsageStatsPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'denied';
+  try {
+    await Shield.requestUsageStats();
+  } catch (e) {
+    console.warn('[Permissions] requestUsageStats failed', e);
+  }
+  return checkUsageStatsPermission();
+};
+
+// Android-specific: Overlay (SYSTEM_ALERT_WINDOW)
+export const checkOverlayPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    const { overlay } = await Shield.checkPermissions();
+    return overlay ? 'granted' : 'prompt';
+  } catch {
+    return 'prompt';
+  }
+};
+
+export const requestOverlayPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    await Shield.requestOverlay();
+  } catch (e) {
+    console.warn('[Permissions] requestOverlay failed', e);
+  }
+  return checkOverlayPermission();
+};
+
+// Android-specific: Battery optimization exemption
+export const checkBatteryPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    const { battery } = await Shield.checkPermissions();
+    return battery ? 'granted' : 'prompt';
+  } catch {
+    return 'prompt';
+  }
+};
+
+export const requestBatteryPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    await Shield.requestBattery();
+  } catch (e) {
+    console.warn('[Permissions] requestBattery failed', e);
+  }
+  return checkBatteryPermission();
+};
+
+// Android-specific: Accessibility (Shield)
+export const checkAccessibilityPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    const { accessibility } = await Shield.checkPermissions();
+    return accessibility ? 'granted' : 'prompt';
+  } catch {
+    return 'prompt';
+  }
+};
+
+export const requestAccessibilityPermission = async (): Promise<PermissionStatus> => {
+  if (!isAndroid) return 'granted';
+  try {
+    await Shield.requestAccessibility();
+  } catch (e) {
+    console.warn('[Permissions] requestAccessibility failed', e);
+  }
+  return checkAccessibilityPermission();
+};
+
+// Open app settings (for when permission was denied)
+export const openAppSettings = async () => {
+  if (!isNative) return;
+  
+  try {
+    // Use the App plugin to open device settings for this app
+    const { Browser } = await import('@capacitor/browser');
+    if (isAndroid) {
+      // Android: open app details settings
+      await Browser.open({ 
+        url: 'app-settings:',
+        presentationStyle: 'fullscreen'
+      });
+    }
+  } catch (error) {
+    console.error('[Permissions] Failed to open app settings:', error);
+    // Fallback: try native intent
+    try {
+      window.open('intent://settings#Intent;end', '_system');
+    } catch {
+      console.log('[Permissions] Cannot open settings programmatically');
+    }
+  }
+};
+
+// Open usage stats settings (for Shield)
+export const openUsageStatsSettings = async () => {
+  if (!isAndroid) return;
+  
+  try {
+    const { Browser } = await import('@capacitor/browser');
+    await Browser.open({ 
+      url: 'android.settings.USAGE_ACCESS_SETTINGS',
+      presentationStyle: 'fullscreen'
+    });
+  } catch (error) {
+    console.error('[Permissions] Failed to open usage stats settings:', error);
+  }
+};
+
+// Open battery optimization settings
+export const openBatterySettings = async () => {
+  if (!isAndroid) return;
+  
+  try {
+    const { Browser } = await import('@capacitor/browser');
+    await Browser.open({ 
+      url: 'android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS',
+      presentationStyle: 'fullscreen'
+    });
+  } catch (error) {
+    console.error('[Permissions] Failed to open battery settings:', error);
+  }
+};
+
+// Get all permission states
+export const getAllPermissions = async (): Promise<PermissionState> => {
+  const [notifications, exactAlarm, usageStats, overlay, battery, accessibility] = await Promise.all([
+    checkNotificationPermission(),
+    checkExactAlarmPermission(),
+    checkUsageStatsPermission(),
+    checkOverlayPermission(),
+    checkBatteryPermission(),
+    checkAccessibilityPermission(),
+  ]);
+
+  return { notifications, exactAlarm, usageStats, overlay, battery, accessibility };
+};
+
+// Check if all required permissions are granted for Rise
+export const hasRisePermissions = async (): Promise<boolean> => {
+  const notifications = await checkNotificationPermission();
+  const exactAlarm = await checkExactAlarmPermission();
+  
+  return notifications === 'granted' && exactAlarm === 'granted';
+};
+
+// Check if all required permissions are granted for Shield
+export const hasShieldPermissions = async (): Promise<boolean> => {
+  const notifications = await checkNotificationPermission();
+  const usageStats = await checkUsageStatsPermission();
+  
+  return notifications === 'granted' && usageStats === 'granted';
+};
+
+// Request all Rise permissions in sequence with user-friendly prompts
+export const requestRisePermissions = async (): Promise<{
+  notifications: PermissionStatus;
+  exactAlarm: PermissionStatus;
+}> => {
+  const notifications = await requestNotificationPermission();
+  const exactAlarm = await requestExactAlarmPermission();
+  return { notifications, exactAlarm };
+};
+
+// Request all Shield permissions in sequence
+export const requestShieldPermissions = async (): Promise<{
+  notifications: PermissionStatus;
+  usageStats: PermissionStatus;
+}> => {
+  const notifications = await requestNotificationPermission();
+  const usageStats = await requestUsageStatsPermission();
+  return { notifications, usageStats };
+};
+
+
+=== FILE: src/utils/permissions.ts ===
+import { Capacitor } from '@capacitor/core';
+import Shield from '@/lib/capacitor/shieldPlugin';
+
+const isAndroid = () => Capacitor.getPlatform() === 'android';
+
+/**
+ * Open Android Accessibility Settings (for Shield AccessibilityService).
+ */
+export const openAccessibilitySettings = async () => {
+  if (!isAndroid()) {
+    alert('This feature is only available on Android.');
+    return;
+  }
+  try {
+    await Shield.requestAccessibility();
+  } catch (e) {
+    console.error('[Permissions] openAccessibilitySettings failed:', e);
+  }
+};
+
+/**
+ * Open Android Battery Optimization settings (used as the safe entry point
+ * for "advanced device protection" since Device Admin must be enabled by
+ * the user explicitly through their own flow).
+ */
+export const openDeviceAdminSettings = async () => {
+  if (!isAndroid()) {
+    alert('This feature is only available on Android.');
+    return;
+  }
+  try {
+    await Shield.requestBattery();
+  } catch (e) {
+    console.error('[Permissions] openDeviceAdminSettings failed:', e);
+  }
+};
+
+/**
+ * Open Android Usage Access Settings (required by Shield to read app usage).
+ */
+export const openUsageAccessSettings = async () => {
+  if (!isAndroid()) return;
+  try {
+    await Shield.requestUsageStats();
+  } catch (e) {
+    console.error('[Permissions] openUsageAccessSettings failed:', e);
+  }
+};
+
+
+=== FILE: src/components/mobile/PermissionOnboarding.tsx ===
+import { useEffect, useState } from 'react';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { CheckCircle2, AlertCircle, Bell, AlarmClock, Eye, BatteryCharging, Activity } from 'lucide-react';
+import { isAndroid, isNative } from '@/lib/capacitor/platform';
+import {
+  checkNotificationPermission,
+  requestNotificationPermission,
+  checkExactAlarmPermission,
+  requestExactAlarmPermission,
+  checkUsageStatsPermission,
+  requestUsageStatsPermission,
+  checkOverlayPermission,
+  requestOverlayPermission,
+  checkBatteryPermission,
+  requestBatteryPermission,
+  checkAccessibilityPermission,
+  requestAccessibilityPermission,
+  type PermissionStatus,
+} from '@/lib/capacitor/permissions';
+
+type FeatureSet = 'rise' | 'shield';
+
+interface PermissionItem {
+  key: string;
+  title: string;
+  description: string;
+  icon: typeof Bell;
+  status: PermissionStatus;
+  request: () => Promise<PermissionStatus>;
+}
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  feature: FeatureSet;
+}
+
+export function PermissionOnboarding({ open, onClose, feature }: Props) {
+  const [items, setItems] = useState<PermissionItem[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const buildItems = async (): Promise<PermissionItem[]> => {
+    const list: PermissionItem[] = [
+      {
+        key: 'notifications',
+        title: 'Notifications',
+        description: 'Show alarm and reminder notifications',
+        icon: Bell,
+        status: await checkNotificationPermission(),
+        request: requestNotificationPermission,
+      },
+    ];
+
+    if (feature === 'rise') {
+      list.push({
+        key: 'exactAlarm',
+        title: 'Exact Alarms',
+        description: 'Required so alarms ring on time, even on locked screen',
+        icon: AlarmClock,
+        status: await checkExactAlarmPermission(),
+        request: requestExactAlarmPermission,
+      });
+    }
+
+    if (feature === 'shield') {
+      list.push(
+        {
+          key: 'usageStats',
+          title: 'Usage Access',
+          description: 'Required to read screen-time and detect blocked apps',
+          icon: Activity,
+          status: await checkUsageStatsPermission(),
+          request: requestUsageStatsPermission,
+        },
+        {
+          key: 'overlay',
+          title: 'Display Over Other Apps',
+          description: 'Required to show the block screen over distracting apps',
+          icon: Eye,
+          status: await checkOverlayPermission(),
+          request: requestOverlayPermission,
+        },
+        {
+          key: 'accessibility',
+          title: 'Accessibility',
+          description: 'Required to detect when blocked apps open',
+          icon: Activity,
+          status: await checkAccessibilityPermission(),
+          request: requestAccessibilityPermission,
+        },
+      );
+    }
+
+    list.push({
+      key: 'battery',
+      title: 'Ignore Battery Optimization',
+      description: 'Keeps Shield/Rise running in the background reliably',
+      icon: BatteryCharging,
+      status: await checkBatteryPermission(),
+      request: requestBatteryPermission,
+    });
+
+    return list;
+  };
+
+  const refresh = async () => {
+    setRefreshing(true);
+    setItems(await buildItems());
+    setRefreshing(false);
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    refresh();
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refresh();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, feature]);
+
+  if (!isNative || !isAndroid) {
+    return null;
+  }
+
+  const handleGrant = async (item: PermissionItem) => {
+    await item.request();
+    // Settings opens externally — refresh on visibility change
+  };
+
+  const allGranted = items.length > 0 && items.every((i) => i.status === 'granted');
+
+  return (
+    <Sheet open={open} onOpenChange={onClose}>
+      <SheetContent side="bottom" className="h-[90vh] p-0 rounded-t-3xl">
+        <SheetHeader className="p-4 border-b border-border">
+          <SheetTitle>
+            {feature === 'rise' ? 'Set up Rise alarms' : 'Set up Shield blocking'}
+          </SheetTitle>
+          <p className="text-sm text-muted-foreground text-left">
+            Android needs you to enable each permission from system settings. Tap a row to open it.
+          </p>
+        </SheetHeader>
+
+        <div className="p-4 space-y-3 overflow-y-auto h-[calc(90vh-160px)]">
+          {items.map((item) => {
+            const Icon = item.icon;
+            const granted = item.status === 'granted';
+            return (
+              <Card key={item.key} className={granted ? 'border-emerald-500/40' : ''}>
+                <CardContent className="p-4 flex items-start gap-3">
+                  <div className="h-10 w-10 rounded-xl bg-muted flex items-center justify-center shrink-0">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium">{item.title}</p>
+                      {granted ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-amber-500" />
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {item.description}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={granted ? 'outline' : 'default'}
+                    onClick={() => handleGrant(item)}
+                    disabled={granted}
+                  >
+                    {granted ? 'Done' : 'Allow'}
+                  </Button>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+
+        <div className="p-4 border-t border-border flex gap-2">
+          <Button variant="outline" className="flex-1" onClick={refresh} disabled={refreshing}>
+            Refresh status
+          </Button>
+          <Button className="flex-1" onClick={onClose}>
+            {allGranted ? 'Done' : 'Continue'}
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+
+=== FILE: src/lib/capacitor/shieldPlugin.ts ===
+import { registerPlugin } from '@capacitor/core';
+
+export interface ShieldPluginInterface {
+  enable(): Promise<void>;
+  disable(): Promise<void>;
+  isEnabled(): Promise<{ enabled: boolean }>;
+
+  blockApps(options: { apps: string[] }): Promise<void>;
+  getBlockedApps(): Promise<{ apps: string[] }>;
+
+  activateFocusMode(): Promise<void>;
+  activateSleepMode(): Promise<void>;
+  activateStrictMode(): Promise<void>;
+  deactivateMode(): Promise<void>;
+  getCurrentMode(): Promise<{ mode: string; strict: boolean }>;
+
+  getStats(options: { packageName: string }): Promise<{ blockCount: number; timeSaved: number }>;
+
+  getScreenTimeStats(): Promise<{
+    totalMinutes: number;
+    totalLaunches: number;
+    apps: Array<{
+      packageName: string;
+      appName: string;
+      usageMinutes: number;
+      launchCount: number;
+      lastUsed: number;
+    }>;
+    error?: string;
+  }>;
+
+  checkPermissions(): Promise<{
+    accessibility: boolean;
+    usageStats: boolean;
+    overlay: boolean;
+    battery: boolean;
+  }>;
+
+  requestAccessibility(): Promise<void>;
+  requestUsageStats(): Promise<void>;
+  requestOverlay(): Promise<void>;
+  requestBattery(): Promise<void>;
+}
+
+const Shield = registerPlugin<ShieldPluginInterface>('Shield');
+
+export default Shield;
+
+
+=== FILE: android/app/src/main/java/com/mylifeos/app/plugins/ShieldPlugin.java ===
+package com.mylifeos.app.plugins;
+
+import android.app.usage.UsageStats;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
+
+import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+
+import com.mylifeos.app.shield.core.ShieldModeManager;
+import com.mylifeos.app.shield.core.ShieldStatsManager;
+import com.mylifeos.app.shield.ShieldPreferences;
+import com.mylifeos.app.shield.ShieldPermissionHelper;
+
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+@CapacitorPlugin(name = "Shield")
+public class ShieldPlugin extends Plugin {
+
+    private ShieldPreferences preferences;
+    private ShieldModeManager modeManager;
+    private ShieldStatsManager statsManager;
+
+    @Override
+    public void load() {
+        preferences = new ShieldPreferences(getContext());
+        modeManager = new ShieldModeManager(getContext());
+        statsManager = new ShieldStatsManager(getContext());
+    }
+
+    @PluginMethod
+    public void enable(PluginCall call) {
+        preferences.setEnabled(true);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void disable(PluginCall call) {
+        preferences.setEnabled(false);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void isEnabled(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("enabled", preferences.isEnabled());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void blockApps(PluginCall call) {
+        JSArray apps = call.getArray("apps");
+        if (apps == null) {
+            call.reject("apps array is required");
+            return;
+        }
+        try {
+            List<String> appList = apps.toList();
+            Set<String> appSet = new HashSet<>(appList);
+            preferences.setBlockedApps(appSet);
+            preferences.setEnabled(true);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to block apps", e);
+        }
+    }
+
+    @PluginMethod
+    public void getBlockedApps(PluginCall call) {
+        Set<String> blocked = preferences.getBlockedApps();
+        JSObject ret = new JSObject();
+        ret.put("apps", new JSArray(blocked));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void activateFocusMode(PluginCall call) {
+        modeManager.activateFocusMode();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void activateSleepMode(PluginCall call) {
+        modeManager.activateSleepMode();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void activateStrictMode(PluginCall call) {
+        modeManager.activateStrictMode();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void deactivateMode(PluginCall call) {
+        modeManager.deactivateMode();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void getCurrentMode(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("mode", modeManager.getCurrentMode());
+        ret.put("strict", modeManager.isStrictMode());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getStats(PluginCall call) {
+        String packageName = call.getString("packageName");
+        if (packageName == null) {
+            call.reject("packageName is required");
+            return;
+        }
+        JSObject ret = new JSObject();
+        ret.put("blockCount", statsManager.getBlockCount(packageName));
+        ret.put("timeSaved", statsManager.getTimeSaved(packageName));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void checkPermissions(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("accessibility", ShieldPermissionHelper.isAccessibilityEnabled(getContext()));
+        ret.put("usageStats", ShieldPermissionHelper.hasUsageStatsPermission(getContext()));
+        ret.put("overlay", ShieldPermissionHelper.canDrawOverlays(getContext()));
+        ret.put("battery", ShieldPermissionHelper.isIgnoringBatteryOptimizations(getContext()));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestAccessibility(PluginCall call) {
+        ShieldPermissionHelper.requestAccessibility(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestUsageStats(PluginCall call) {
+        ShieldPermissionHelper.requestUsageStats(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestOverlay(PluginCall call) {
+        ShieldPermissionHelper.requestOverlay(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestBattery(PluginCall call) {
+        ShieldPermissionHelper.requestIgnoreBattery(getContext());
+        call.resolve();
+    }
+
+    /**
+     * Returns real device usage stats for today via UsageStatsManager.
+     * Requires PACKAGE_USAGE_STATS permission (granted via Settings).
+     *
+     * Response shape: {
+     *   totalMinutes: number,
+     *   totalLaunches: number,
+     *   apps: [{ packageName, appName, usageMinutes, launchCount, lastUsed }, ...]
+     * }
+     */
+    @PluginMethod
+    public void getScreenTimeStats(PluginCall call) {
+        Context context = getContext();
+        JSObject ret = new JSObject();
+
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+            ret.put("totalMinutes", 0);
+            ret.put("totalLaunches", 0);
+            ret.put("apps", new JSArray());
+            ret.put("error", "API level too low");
+            call.resolve(ret);
+            return;
+        }
+
+        if (!ShieldPermissionHelper.hasUsageStatsPermission(context)) {
+            ret.put("totalMinutes", 0);
+            ret.put("totalLaunches", 0);
+            ret.put("apps", new JSArray());
+            ret.put("error", "PACKAGE_USAGE_STATS not granted");
+            call.resolve(ret);
+            return;
+        }
+
+        try {
+            UsageStatsManager usm = (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) {
+                ret.put("totalMinutes", 0);
+                ret.put("totalLaunches", 0);
+                ret.put("apps", new JSArray());
+                call.resolve(ret);
+                return;
+            }
+
+            // Start of today (local midnight)
+            Calendar cal = Calendar.getInstance();
+            cal.set(Calendar.HOUR_OF_DAY, 0);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            cal.set(Calendar.MILLISECOND, 0);
+            long startMs = cal.getTimeInMillis();
+            long endMs = System.currentTimeMillis();
+
+            List<UsageStats> stats = usm.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY, startMs, endMs);
+
+            PackageManager pm = context.getPackageManager();
+            long totalMs = 0;
+            int totalLaunches = 0;
+            JSArray apps = new JSArray();
+
+            if (stats != null) {
+                // Aggregate by package (queryUsageStats can return multiple rows per pkg)
+                java.util.Map<String, long[]> agg = new java.util.HashMap<>();
+                for (UsageStats s : stats) {
+                    if (s == null || s.getPackageName() == null) continue;
+                    long t = s.getTotalTimeInForeground();
+                    if (t <= 0) continue;
+                    long[] existing = agg.get(s.getPackageName());
+                    if (existing == null) {
+                        existing = new long[]{0, s.getLastTimeUsed()};
+                        agg.put(s.getPackageName(), existing);
+                    }
+                    existing[0] += t;
+                    if (s.getLastTimeUsed() > existing[1]) existing[1] = s.getLastTimeUsed();
+                }
+
+                List<java.util.Map.Entry<String, long[]>> sorted = new ArrayList<>(agg.entrySet());
+                sorted.sort((a, b) -> Long.compare(b.getValue()[0], a.getValue()[0]));
+
+                for (java.util.Map.Entry<String, long[]> e : sorted) {
+                    String pkg = e.getKey();
+                    long timeMs = e.getValue()[0];
+                    long lastUsed = e.getValue()[1];
+                    if (timeMs < 60 * 1000) continue; // skip <1 minute
+                    totalMs += timeMs;
+
+                    String appName = pkg;
+                    try {
+                        ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+                        appName = pm.getApplicationLabel(ai).toString();
+                    } catch (Exception ignored) {}
+
+                    JSObject app = new JSObject();
+                    app.put("packageName", pkg);
+                    app.put("appName", appName);
+                    app.put("usageMinutes", (int) (timeMs / 60000));
+                    app.put("launchCount", 0); // not directly available without events query
+                    app.put("lastUsed", lastUsed);
+                    apps.put(app);
+                }
+            }
+
+            ret.put("totalMinutes", (int) (totalMs / 60000));
+            ret.put("totalLaunches", totalLaunches);
+            ret.put("apps", apps);
+            call.resolve(ret);
+        } catch (Exception ex) {
+            ret.put("totalMinutes", 0);
+            ret.put("totalLaunches", 0);
+            ret.put("apps", new JSArray());
+            ret.put("error", ex.getMessage());
+            call.resolve(ret);
+        }
+    }
+}
+
+=== FILE: android/app/src/main/java/com/mylifeos/app/shield/ShieldAccessibilityService.java ===
+package com.mylifeos.app.shield;
+
+import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.Intent;
+import android.view.accessibility.AccessibilityEvent;
+import java.util.HashSet;
+import java.util.Set;
+
+public class ShieldAccessibilityService extends AccessibilityService {
+    private ShieldPreferences preferences;
+    
+    // এই প্যাকেজগুলা কখনো ব্লক করবো না
+    private static final Set<String> WHITELIST = new HashSet<String>() {{
+        add("com.android.systemui");
+        add("com.android.launcher");
+        add("com.android.launcher3");
+        add("com.google.android.apps.nexuslauncher");
+        add("com.mi.android.globallauncher");
+        add("com.sec.android.app.launcher");
+        add("com.android.settings");
+        add("com.android.phone");
+        add("com.android.incallui");
+    }};
+
+    @Override
+    public void onServiceConnected() {
+        super.onServiceConnected();
+        preferences = new ShieldPreferences(this);
+        
+        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+        // ফিক্স 1: FLAG_INCLUDE_NOT_IMPORTANT_VIEWS অ্যাড করলাম। সব অ্যাপ ধরা পড়বে
+        info.flags = AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS | AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS;
+        info.notificationTimeout = 100;
+        setServiceInfo(info);
+    }
+
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (preferences == null || !preferences.isEnabled()) return;
+        if (event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) return;
+        if (event.getPackageName() == null) return;
+
+        String currentPackage = event.getPackageName().toString();
+        String myPackage = getPackageName();
+
+        // ফিক্স 2: হোয়াইটলিস্ট চেক
+        if (currentPackage.equals(myPackage) || WHITELIST.contains(currentPackage)) {
+            return;
+        }
+
+        Set<String> blockedApps = preferences.getBlockedApps();
+        if (blockedApps != null && blockedApps.contains(currentPackage)) {
+            // ফিক্স 3: ব্লকড অ্যাপে ঢুকলেই ব্যাক চাপো + ব্লক স্ক্রিন দেখাও
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            launchBlockScreen(currentPackage, "blocked");
+        }
+    }
+
+    private void launchBlockScreen(String packageName, String reason) {
+        try {
+            Intent intent = new Intent(this, ShieldBlockActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            intent.putExtra("blocked_package", packageName);
+            intent.putExtra("reason", reason);
+            startActivity(intent);
+        } catch (Exception e) {
+            // ফিক্স 4: ক্র্যাশ হলে লগ করো, সার্ভিস যাতে না মরে
+            android.util.Log.e("ShieldAccessibility", "Failed to launch block screen: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void onInterrupt() {
+        // সার্ভিস ইন্টারাপ্ট হলে কিছু করার নাই
+    }
+}
+
+=== FILE: android/app/src/main/java/com/mylifeos/app/shield/ShieldBlockActivity.java ===
+package com.mylifeos.app.shield;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
+import android.os.Bundle;
+import android.view.View;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.TextView;
+import com.mylifeos.app.R;
+
+public class ShieldBlockActivity extends Activity {
+    private String blockedPackage;
+    private String reason;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_shield_block);
+
+        Intent intent = getIntent();
+        blockedPackage = intent.getStringExtra("blocked_package");
+        reason = intent.getStringExtra("reason");
+
+        // ফিক্স 1: blockedPackage null হলে অ্যাক্টিভিটি বন্ধ করে দাও
+        if (blockedPackage == null || blockedPackage.isEmpty()) {
+            goToHome();
+            return;
+        }
+
+        setupUI();
+    }
+
+    private void setupUI() {
+        ImageView iconView = findViewById(R.id.block_icon);
+        TextView appNameView = findViewById(R.id.block_app_name);
+        TextView reasonView = findViewById(R.id.block_reason);
+        Button homeBtn = findViewById(R.id.block_home_btn);
+        Button closeBtn = findViewById(R.id.block_close_btn);
+
+        try {
+            PackageManager pm = getPackageManager();
+            ApplicationInfo appInfo = pm.getApplicationInfo(blockedPackage, 0);
+            iconView.setImageDrawable(pm.getApplicationIcon(appInfo));
+            appNameView.setText(pm.getApplicationLabel(appInfo));
+        } catch (Exception e) {
+            // ফিক্স 2: অ্যাপ না পাইলে প্যাকেজ নামই দেখাও
+            iconView.setImageResource(android.R.drawable.ic_lock_lock);
+            appNameView.setText(blockedPackage);
+        }
+
+        if ("time_limit".equals(reason)) {
+            reasonView.setText("You have reached your time limit for this app today.\nTake a break and come back tomorrow.");
+        } else {
+            reasonView.setText("This app is blocked by Shield to protect your focus.\nStay on track with your goals.");
+        }
+
+        View.OnClickListener goHome = v -> goToHome();
+        homeBtn.setOnClickListener(goHome);
+        closeBtn.setOnClickListener(goHome);
+    }
+
+    private void goToHome() {
+        // ফিক্স 3: finishAffinity() দিয়ে সব অ্যাক্টিভিটি ক্লিয়ার করো
+        Intent startMain = new Intent(Intent.ACTION_MAIN);
+        startMain.addCategory(Intent.CATEGORY_HOME);
+        startMain.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(startMain);
+        finishAffinity();
+    }
+
+    @Override
+    public void onBackPressed() {
+        // ব্যাক বাটন দিয়েও যাতে ব্লকড অ্যাপে যাওয়া না যায়
+        goToHome();
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // ফিক্স 4: ইউজার Recent বাটন চেপে বের হলে এই স্ক্রিন সামনে আনো
+        if (!isFinishing()) {
+            Intent intent = new Intent(this, ShieldBlockActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            intent.putExtra("blocked_package", blockedPackage);
+            intent.putExtra("reason", reason);
+            startActivity(intent);
+        }
+    }
+}
+
+=== FILE: android/app/src/main/java/com/mylifeos/app/shield/ShieldPermissionHelper.java ===
+package com.mylifeos.app.shield;
+
+import android.app.Activity;
+import android.app.AppOpsManager;
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.PowerManager;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.util.Log;
+import android.view.accessibility.AccessibilityManager;
+import android.accessibilityservice.AccessibilityServiceInfo;
+
+import java.util.List;
+
+public class ShieldPermissionHelper {
+
+    private static final String TAG = "ShieldPermission";
+    // তোমার AccessibilityService এর ফুল পাথ। AndroidManifest.xml এর সাথে মিলায় নিও।
+    private static final String ACCESSIBILITY_SERVICE_NAME = "com.mylifeos.app/com.mylifeos.app.shield.ShieldAccessibilityService";
+
+    // তোমার আগের কোডের সাথে মিলিয়ে static বানানো হলো
+
+    public static boolean hasUsageStatsPermission(Context context) {
+        if (context == null) return false;
+        AppOpsManager appOps = (AppOpsManager) context.getSystemService(Context.APP_OPS_SERVICE);
+        int mode = appOps.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS, android.os.Process.myUid(), context.getPackageName());
+        return mode == AppOpsManager.MODE_ALLOWED;
+    }
+
+    public static void requestUsageStats(Context context) {
+        if (context == null) return;
+        try {
+            Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open Usage Stats Settings: " + e.getMessage());
+        }
+    }
+
+    public static boolean isAccessibilityEnabled(Context context) {
+        if (context == null) return false;
+        AccessibilityManager am = (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
+        if (am == null) return false;
+        try {
+            List<AccessibilityServiceInfo> enabledServices = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
+            for (AccessibilityServiceInfo service : enabledServices) {
+                if (service.getId() != null && service.getId().equals(ACCESSIBILITY_SERVICE_NAME)) return true;
+            }
+            String enabledServicesSetting = Settings.Secure.getString(context.getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            if (enabledServicesSetting != null) {
+                TextUtils.SimpleStringSplitter splitter = new TextUtils.SimpleStringSplitter(':');
+                splitter.setString(enabledServicesSetting);
+                while (splitter.hasNext()) {
+                    if (splitter.next().equalsIgnoreCase(ACCESSIBILITY_SERVICE_NAME)) return true;
+                }
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Error checking accessibility: " + e.getMessage());
+        }
+        return false;
+    }
+
+    public static void requestAccessibility(Context context) {
+        if (context == null) return;
+        try {
+            Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open Accessibility Settings: " + e.getMessage());
+        }
+    }
+
+    public static boolean isDeviceAdminActive(Context context) {
+        if (context == null) return false;
+        DevicePolicyManager dpm = (DevicePolicyManager) context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName admin = new ComponentName(context, ShieldDeviceAdminReceiver.class);
+        return dpm.isAdminActive(admin);
+    }
+
+    public static void requestDeviceAdmin(Context context) {
+        if (context == null) return;
+        try {
+            ComponentName admin = new ComponentName(context, ShieldDeviceAdminReceiver.class);
+            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, admin);
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION, "Enable Device Admin to prevent Shield from being uninstalled during Strict Mode");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open Device Admin Settings: " + e.getMessage());
+        }
+    }
+
+    public static boolean canDrawOverlays(Context context) {
+        if (context == null) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            return Settings.canDrawOverlays(context);
+        }
+        return true;
+    }
+
+    public static void requestOverlay(Context context) {
+        if (context == null) return;
+        try {
+            Intent intent;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + context.getPackageName()));
+            } else {
+                intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + context.getPackageName()));
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open Overlay Settings: " + e.getMessage());
+        }
+    }
+
+    public static boolean isIgnoringBatteryOptimizations(Context context) {
+        if (context == null) return false;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
+            if (pm == null) return false;
+            return pm.isIgnoringBatteryOptimizations(context.getPackageName());
+        }
+        return true;
+    }
+
+    public static void requestIgnoreBattery(Context context) {
+        if (context == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                intent.setData(Uri.parse("package:" + context.getPackageName()));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                context.startActivity(intent);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to open Battery Settings: " + e.getMessage());
+        }
+    }
+
+    public static boolean hasAllPermissions(Context context) {
+        return hasUsageStatsPermission(context) && isAccessibilityEnabled(context);
+    }
+}
+
+=== FILE: android/app/src/main/java/com/mylifeos/app/shield/ShieldPreferences.java ===
+package com.mylifeos.app.shield;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import com.google.gson.Gson;
+import com.google.gson.reflect.TypeToken;
+import java.lang.reflect.Type;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
+public class ShieldPreferences {
+    private static final String PREF_NAME = "shield_prefs";
+    private static final String KEY_IS_ENABLED = "is_enabled";
+    private static final String KEY_BLOCKED_APPS = "blocked_apps";
+    private static final String KEY_CURRENT_MODE = "current_mode";
+    private static final String KEY_TIME_LIMITS = "time_limits";
+    private static final String KEY_STATS_CACHE = "stats_cache";
+    private static final String KEY_LAST_RESET = "last_reset_date";
+    private static final String KEY_STRICT_MODE = "strict_mode";
+
+    private final SharedPreferences prefs;
+    private final Gson gson;
+
+    public ShieldPreferences(Context context) {
+        prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        gson = new Gson();
+    }
+
+    public boolean isEnabled() {
+        return prefs.getBoolean(KEY_IS_ENABLED, false);
+    }
+
+    public void setEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_IS_ENABLED, enabled).apply();
+    }
+
+    public Set<String> getBlockedApps() {
+        // ফিক্স 1: নতুন HashSet বানায় রিটার্ন করো। ডাইরেক্ট রেফারেন্স না।
+        Set<String> storedSet = prefs.getStringSet(KEY_BLOCKED_APPS, null);
+        return storedSet != null ? new HashSet<>(storedSet) : new HashSet<>();
+    }
+
+    public void setBlockedApps(Set<String> packages) {
+        // ফিক্স 2: নতুন HashSet বানায় সেভ করো। বাইরের সেট মডিফাই হলে ঝামেলা হবে না।
+        prefs.edit().putStringSet(KEY_BLOCKED_APPS, new HashSet<>(packages)).apply();
+    }
+
+    public String getCurrentMode() {
+        return prefs.getString(KEY_CURRENT_MODE, "normal");
+    }
+
+    public void setCurrentMode(String mode) {
+        prefs.edit().putString(KEY_CURRENT_MODE, mode).apply();
+    }
+
+    public Map<String, Integer> getTimeLimits() {
+        String json = prefs.getString(KEY_TIME_LIMITS, "{}");
+        try {
+            Type type = new TypeToken<HashMap<String, Integer>>(){}.getType();
+            Map<String, Integer> map = gson.fromJson(json, type);
+            return map != null ? map : new HashMap<>();
+        } catch (Exception e) {
+            // ফিক্স 3: JSON পার্স না হলে ক্র্যাশ না করে খালি ম্যাপ দাও
+            return new HashMap<>();
+        }
+    }
+
+    public void setTimeLimits(Map<String, Integer> limits) {
+        String json = gson.toJson(limits != null ? limits : new HashMap<>());
+        prefs.edit().putString(KEY_TIME_LIMITS, json).apply();
+    }
+
+    public boolean isStrictMode() {
+        return prefs.getBoolean(KEY_STRICT_MODE, false);
+    }
+
+    public void setStrictMode(boolean strict) {
+        prefs.edit().putBoolean(KEY_STRICT_MODE, strict).apply();
+    }
+
+    public String getLastResetDate() {
+        return prefs.getString(KEY_LAST_RESET, "");
+    }
+
+    public void updateLastResetDate(String date) {
+        prefs.edit().putString(KEY_LAST_RESET, date).apply();
+    }
+
+    public void clearAll() {
+        prefs.edit().clear().apply();
+    }
+}
+
+=== FILE: android/app/src/main/java/com/mylifeos/app/shield/core/ShieldModeManager.java ===
+package com.mylifeos.app.shield.core;
+
+import android.content.Context;
+import com.mylifeos.app.shield.ShieldPreferences;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+
+public class ShieldModeManager {
+    private final ShieldPreferences preferences;
+    
+    private static final Set<String> FOCUS_MODE_APPS = new HashSet<>(Arrays.asList(
+        "com.instagram.android",
+        "com.facebook.katana",
+        "com.zhiliaoapp.musically",
+        "com.google.android.youtube"
+    ));
+    
+    private static final Set<String> SLEEP_MODE_APPS = new HashSet<>(Arrays.asList(
+        "com.instagram.android",
+        "com.facebook.katana",
+        "com.zhiliaoapp.musically",
+        "com.google.android.youtube",
+        "com.twitter.android",
+        "com.reddit.frontpage"
+    ));
+
+    public ShieldModeManager(Context context) {
+        this.preferences = new ShieldPreferences(context);
+    }
+
+    public void activateFocusMode() {
+        Set<String> current = preferences.getBlockedApps();
+        current.addAll(FOCUS_MODE_APPS);
+        preferences.setBlockedApps(current);
+        preferences.setCurrentMode("focus");
+        preferences.setEnabled(true);
+    }
+
+    public void activateSleepMode() {
+        Set<String> current = preferences.getBlockedApps();
+        current.addAll(SLEEP_MODE_APPS);
+        preferences.setBlockedApps(current);
+        preferences.setCurrentMode("sleep");
+        preferences.setEnabled(true);
+    }
+
+    public void activateStrictMode() {
+        preferences.setStrictMode(true);
+        preferences.setEnabled(true);
+    }
+
+    public void deactivateMode() {
+        preferences.setCurrentMode("normal");
+        preferences.setEnabled(false);
+    }
+
+    public String getCurrentMode() {
+        return preferences.getCurrentMode();
+    }
+
+    public boolean isStrictMode() {
+        return preferences.isStrictMode();
+    }
+}
+
+=== FILE: src/pages/Shield.tsx ===
+import { useState, useEffect, useCallback } from 'react';
+import { useAuth } from '@/hooks/useAuth';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
+import { ShieldBottomNav } from '@/components/shield/ShieldBottomNav';
+import { ShieldHeader } from '@/components/shield/ShieldHeader';
+import { ShieldProfilesSection } from '@/components/shield/ShieldProfilesSection';
+import { ShieldModes } from '@/components/shield/ShieldModes';
+import { ShieldSettings } from '@/components/shield/ShieldSettings';
+import { ShieldBlockScreen } from '@/components/shield/ShieldBlockScreen';
+import { ShieldAnalytics } from '@/components/shield/ShieldAnalytics';
+import { ShieldAccountability } from '@/components/shield/ShieldAccountability';
+import { ShieldUsageStats } from '@/components/shield/ShieldUsageStats';
+import { ShieldFocusTimer } from '@/components/shield/ShieldFocusTimer';
+import { ShieldQuickActions } from '@/components/shield/ShieldQuickActions';
+import { isNative } from '@/lib/capacitor/platform';
+import { 
+  startShieldSession as startNativeSession, 
+  endShieldSession as endNativeSession,
+  requestEmergencyBypass
+} from '@/lib/capacitor/nativeShield';
+import { requestShieldPermissions } from '@/lib/capacitor/permissions';
+
+type StrictnessMode = 'normal' | 'lock' | 'strict';
+type SubPage = 'main' | 'block-screen';
+
+interface DisciplineProfile {
+  id: string;
+  name: string;
+  icon: string;
+  description: string | null;
+  strictness_level: string;
+  is_active: boolean;
+  blocked_apps: string[];
+  blocked_websites: string[];
+  blocked_keywords: string[];
+  block_infinite_content: boolean;
+  block_adult_content: boolean;
+  default_duration_minutes: number;
+}
+
+interface DisciplineScore {
+  current_score: number;
+  current_streak_days: number;
+  total_focus_minutes: number;
+  total_time_saved_minutes: number;
+  can_use_absolute_mode: boolean;
+}
+
+interface ShieldSession {
+  id: string;
+  profile_name: string;
+  strictness_level: string;
+  started_at: string;
+  scheduled_end_at: string | null;
+  status: string;
+  bypass_attempts: number;
+}
+
+export default function ShieldPage() {
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('dashboard');
+  const [subPage, setSubPage] = useState<SubPage>('main');
+  const [profiles, setProfiles] = useState<DisciplineProfile[]>([]);
+  const [disciplineScore, setDisciplineScore] = useState<DisciplineScore | null>(null);
+  const [activeSession, setActiveSession] = useState<ShieldSession | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  
+  // Strictness mode - persisted to discipline_scores
+  const [strictnessMode, setStrictnessMode] = useState<StrictnessMode>('normal');
+  
+  // Settings state - persisted to app_settings
+  const [settings, setSettings] = useState({
+    pauseDurationEnabled: true,
+    blockSplitScreen: false,
+    blockPowerOff: false,
+    blockRecentApps: false,
+    lowTimeAlert: true,
+    pomodoroBreak: true,
+  });
+  
+  // Block screen selection
+  const [selectedBlockScreen, setSelectedBlockScreen] = useState('default');
+
+  // Derived from profiles - aggregate all blocked items across all profiles
+  const allBlockedApps = [...new Set(profiles.flatMap(p => p.blocked_apps))];
+  const allBlockedWebsites = [...new Set(profiles.flatMap(p => p.blocked_websites))];
+  const allBlockedKeywords = [...new Set(profiles.flatMap(p => p.blocked_keywords))];
+  const reelsBlockEnabled = profiles.some(p => p.block_infinite_content);
+  const adultBlockEnabled = profiles.some(p => p.block_adult_content);
+
+  useEffect(() => {
+    if (user) {
+      loadShieldData();
+      loadSettings();
+      // Request native permissions on mount
+      if (isNative) {
+        requestShieldPermissions().catch(console.error);
+      }
+    }
+  }, [user]);
+
+  const loadShieldData = async () => {
+    if (!user) return;
+    setIsLoading(true);
+
+    try {
+      const { data: profilesData } = await supabase
+        .from('discipline_profiles')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+
+      let { data: scoreData } = await supabase
+        .from('discipline_scores')
+        .select('*')
+        .eq('user_id', user.id)
+        .single();
+
+      if (!scoreData) {
+        const { data: newScore } = await supabase
+          .from('discipline_scores')
+          .insert({ user_id: user.id })
+          .select()
+          .single();
+        scoreData = newScore;
+      }
+
+      const { data: sessionData } = await supabase
+        .from('shield_sessions')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('status', 'active')
+        .single();
+
+      const mappedProfiles: DisciplineProfile[] = (profilesData || []).map(p => ({
+        id: p.id,
+        name: p.name,
+        icon: p.icon || '🎯',
+        description: p.description,
+        strictness_level: p.strictness_level || 'normal',
+        is_active: p.is_active || false,
+        blocked_apps: Array.isArray(p.blocked_apps) ? p.blocked_apps as string[] : [],
+        blocked_websites: Array.isArray(p.blocked_websites) ? p.blocked_websites as string[] : [],
+        blocked_keywords: Array.isArray(p.blocked_keywords) ? p.blocked_keywords as string[] : [],
+        block_infinite_content: p.block_infinite_content || false,
+        block_adult_content: p.block_adult_content || false,
+        default_duration_minutes: p.default_duration_minutes || 60
+      }));
+
+      setProfiles(mappedProfiles);
+      setDisciplineScore(scoreData);
+      setActiveSession(sessionData);
+
+      if (mappedProfiles.length === 0) {
+        await createDefaultProfiles();
+      }
+    } catch (error) {
+      console.error('Error loading shield data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const loadSettings = async () => {
+    if (!user) return;
+    try {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('key, value')
+        .in('key', ['shield_settings', 'shield_strictness_mode', 'shield_block_screen']);
+
+      if (data) {
+        for (const setting of data) {
+          if (setting.key === 'shield_settings' && typeof setting.value === 'object') {
+            setSettings(prev => ({ ...prev, ...setting.value as any }));
+          }
+          if (setting.key === 'shield_strictness_mode' && typeof setting.value === 'object') {
+            const val = (setting.value as any).mode;
+            if (val) setStrictnessMode(val as StrictnessMode);
+          }
+          if (setting.key === 'shield_block_screen' && typeof setting.value === 'object') {
+            const val = (setting.value as any).screen;
+            if (val) setSelectedBlockScreen(val);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  };
+
+  const saveSettingToDB = useCallback(async (key: string, value: any) => {
+    if (!user) return;
+    try {
+      const { data: existing } = await supabase
+        .from('app_settings')
+        .select('id')
+        .eq('key', key)
+        .single();
+
+      if (existing) {
+        await supabase.from('app_settings').update({ value, updated_by: user.id }).eq('key', key);
+      } else {
+        await supabase.from('app_settings').insert({ key, value, updated_by: user.id });
+      }
+    } catch (error) {
+      console.error('Error saving setting:', error);
+    }
+  }, [user]);
+
+  const createDefaultProfiles = async () => {
+    if (!user) return;
+
+    const defaultProfiles = [
+      {
+        user_id: user.id,
+        name: 'Study Mode',
+        icon: '📚',
+        description: 'Block distractions while studying',
+        strictness_level: 'hard',
+        blocked_apps: ['Instagram', 'TikTok', 'YouTube', 'Facebook'],
+        blocked_websites: ['instagram.com', 'tiktok.com', 'facebook.com'],
+        blocked_keywords: ['shorts', 'reels', 'stories'],
+        block_infinite_content: true,
+        block_adult_content: true,
+        default_duration_minutes: 120,
+        is_preset: true
+      },
+      {
+        user_id: user.id,
+        name: 'Deep Work',
+        icon: '💼',
+        description: 'Maximum focus for important work',
+        strictness_level: 'absolute',
+        blocked_apps: ['All Social Media', 'Games', 'Entertainment'],
+        blocked_websites: ['facebook.com'],
+        blocked_keywords: [],
+        block_infinite_content: true,
+        block_adult_content: true,
+        default_duration_minutes: 180,
+        is_preset: true
+      }
+    ];
+
+    const { data } = await supabase
+      .from('discipline_profiles')
+      .insert(defaultProfiles)
+      .select();
+
+    if (data) {
+      const mappedProfiles: DisciplineProfile[] = data.map(p => ({
+        id: p.id,
+        name: p.name,
+        icon: p.icon || '🎯',
+        description: p.description,
+        strictness_level: p.strictness_level || 'normal',
+        is_active: p.is_active || false,
+        blocked_apps: Array.isArray(p.blocked_apps) ? p.blocked_apps as string[] : [],
+        blocked_websites: Array.isArray(p.blocked_websites) ? p.blocked_websites as string[] : [],
+        blocked_keywords: Array.isArray(p.blocked_keywords) ? p.blocked_keywords as string[] : [],
+        block_infinite_content: p.block_infinite_content || false,
+        block_adult_content: p.block_adult_content || false,
+        default_duration_minutes: p.default_duration_minutes || 60
+      }));
+      setProfiles(mappedProfiles);
+    }
+  };
+
+  const startSession = async (profile: DisciplineProfile) => {
+    if (!user) return;
+
+    const now = new Date();
+    const endTime = new Date();
+    endTime.setMinutes(endTime.getMinutes() + profile.default_duration_minutes);
+
+    const { data, error } = await supabase
+      .from('shield_sessions')
+      .insert({
+        user_id: user.id,
+        profile_id: profile.id,
+        profile_name: profile.name,
+        strictness_level: profile.strictness_level,
+        scheduled_end_at: endTime.toISOString(),
+        status: 'active'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      toast.error('Failed to start session');
+      return;
+    }
+
+    // Start native shield session for background protection
+    if (isNative && data) {
+      await startNativeSession({
+        id: data.id,
+        profileId: profile.id,
+        profileName: profile.name,
+        strictnessLevel: profile.strictness_level as any,
+        startedAt: now,
+        scheduledEndAt: endTime,
+        blockedApps: profile.blocked_apps,
+        blockedWebsites: profile.blocked_websites,
+        blockedKeywords: profile.blocked_keywords,
+        blockInfiniteContent: profile.block_infinite_content,
+        blockAdultContent: profile.block_adult_content,
+      }, user.id);
+    }
+
+    await supabase
+      .from('discipline_profiles')
+      .update({ is_active: true })
+      .eq('id', profile.id);
+
+    setActiveSession(data);
+    toast.success(`${profile.name} activated! Stay focused 🛡️`);
+    loadShieldData();
+  };
+
+  const handleEndSession = async (reason?: string) => {
+    if (!user || !activeSession) return;
+
+    try {
+      // End native shield session
+      if (isNative) {
+        await endNativeSession(reason, user.id);
+      }
+
+      await supabase
+        .from('shield_sessions')
+        .update({ 
+          status: 'completed',
+          actual_end_at: new Date().toISOString()
+        })
+        .eq('id', activeSession.id);
+
+      setActiveSession(null);
+      toast.success('Session ended');
+      loadShieldData();
+    } catch (error) {
+      console.error('Error ending session:', error);
+      toast.error('Failed to end session');
+    }
+  };
+
+  const handleSettingChange = (key: string, value: boolean) => {
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+    saveSettingToDB('shield_settings', newSettings);
+  };
+
+  const handleModeChange = (mode: StrictnessMode) => {
+    setStrictnessMode(mode);
+    saveSettingToDB('shield_strictness_mode', { mode });
+  };
+
+  const handleBlockScreenChange = (screen: string) => {
+    setSelectedBlockScreen(screen);
+    saveSettingToDB('shield_block_screen', { screen });
+  };
+
+  const handleReelsToggle = async (enabled: boolean) => {
+    if (!user) return;
+    // Update all profiles' block_infinite_content
+    for (const profile of profiles) {
+      await supabase
+        .from('discipline_profiles')
+        .update({ block_infinite_content: enabled })
+        .eq('id', profile.id);
+    }
+    loadShieldData();
+    toast.success(enabled ? 'Reels & Shorts blocked' : 'Reels & Shorts unblocked');
+  };
+
+  const handleAdultToggle = async (enabled: boolean) => {
+    if (!user) return;
+    for (const profile of profiles) {
+      await supabase
+        .from('discipline_profiles')
+        .update({ block_adult_content: enabled })
+        .eq('id', profile.id);
+    }
+    loadShieldData();
+    toast.success(enabled ? 'Adult content blocked' : 'Adult content filter off');
+  };
+
+  const handleNavigate = (page: string) => {
+    if (page === 'block-screen') {
+      setSubPage(page as SubPage);
+    }
+  };
+
+  const handleTabChange = (tab: string) => {
+    setActiveTab(tab);
+    setSubPage('main');
+  };
+
+  const handleBreakStart = (minutes: number) => {
+    toast.success(`Break started for ${minutes} minutes`);
+  };
+
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good Morning';
+    if (hour < 17) return 'Good Afternoon';
+    return 'Good Evening';
+  };
+
+  // Render block screen sub-page
+  if (subPage === 'block-screen') {
+    return (
+      <ShieldBlockScreen 
+        onBack={() => setSubPage('main')}
+        selectedScreen={selectedBlockScreen}
+        onSelectScreen={handleBlockScreenChange}
+      />
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background p-4">
+        <div className="animate-pulse space-y-4">
+          <div className="h-20 bg-muted rounded-2xl" />
+          <div className="h-32 bg-muted rounded-2xl" />
+          <div className="h-48 bg-muted rounded-2xl" />
+          <div className="h-64 bg-muted rounded-2xl" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background pb-24">
+      {/* Header */}
+      <ShieldHeader />
+      
+      {/* Content Area */}
+      <div className="px-4 py-4 space-y-4">
+        {activeTab === 'dashboard' && (
+          <>
+            {/* Welcome Message */}
+            <div className="mb-2">
+              <p className="text-sm text-muted-foreground">Welcome back</p>
+              <h1 className="text-2xl font-bold">{getGreeting()}</h1>
+            </div>
+
+            {/* Usage Stats */}
+            <ShieldUsageStats onViewDetails={() => handleTabChange('analytics')} />
+
+            {/* Focus Timer / Take a Break */}
+            <ShieldFocusTimer 
+              isSessionActive={!!activeSession}
+              onStartBreak={handleBreakStart}
+              disabled={!!activeSession}
+            />
+
+            {/* Profiles Section */}
+            <ShieldProfilesSection
+              profiles={profiles}
+              onActivate={startSession}
+              activeSession={activeSession}
+              onRefresh={loadShieldData}
+            />
+
+            {/* Quick Actions - now from real data */}
+            <ShieldQuickActions
+              blockedAppsCount={allBlockedApps.length}
+              blockedSitesCount={allBlockedWebsites.length}
+              blockedKeywordsCount={allBlockedKeywords.length}
+              reelsBlockEnabled={reelsBlockEnabled}
+              adultBlockEnabled={adultBlockEnabled}
+              onReelsToggle={handleReelsToggle}
+              onAdultToggle={handleAdultToggle}
+              onManageApps={() => handleTabChange('modes')}
+              onManageSites={() => handleTabChange('modes')}
+              onManageKeywords={() => handleTabChange('modes')}
+            />
+          </>
+        )}
+
+        {activeTab === 'modes' && (
+          <ShieldModes
+            activeMode={strictnessMode}
+            onModeChange={handleModeChange}
+            disciplineScore={disciplineScore?.current_score}
+          />
+        )}
+
+        {activeTab === 'analytics' && (
+          <ShieldAnalytics disciplineScore={disciplineScore} />
+        )}
+
+        {activeTab === 'account' && (
+          <ShieldAccountability />
+        )}
+
+        {activeTab === 'settings' && (
+          <ShieldSettings 
+            settings={settings}
+            onSettingChange={handleSettingChange}
+            onNavigate={handleNavigate}
+          />
+        )}
+      </div>
+
+      {/* Bottom Navigation */}
+      <ShieldBottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+    </div>
+  );
+}
+
+
+=== FILE: src/components/shield/ShieldBlocking.tsx ===
+import { useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { 
+  Ban, 
+  Globe, 
+  Smartphone, 
+  Type, 
+  Film, 
+  Plus,
+  Trash2,
+  Shield,
+  AlertTriangle,
+  X
+} from 'lucide-react';
+import { cn } from '@/lib/utils';
+
+interface BlockedItem {
+  id: string;
+  name: string;
+  type: 'app' | 'website' | 'keyword';
+  category?: string;
+}
+
+interface ShieldBlockingProps {
+  blockedApps: string[];
+  blockedWebsites: string[];
+  blockedKeywords: string[];
+  blockInfiniteContent: boolean;
+  blockAdultContent: boolean;
+  onUpdate: (data: any) => void;
+}
+
+export function ShieldBlocking({ 
+  blockedApps, 
+  blockedWebsites, 
+  blockedKeywords,
+  blockInfiniteContent,
+  blockAdultContent,
+  onUpdate 
+}: ShieldBlockingProps) {
+  const [newApp, setNewApp] = useState('');
+  const [newWebsite, setNewWebsite] = useState('');
+  const [newKeyword, setNewKeyword] = useState('');
+  const [activeBlockTab, setActiveBlockTab] = useState('apps');
+
+  const popularApps = [
+    { name: 'Instagram', icon: '📷', category: 'Social' },
+    { name: 'TikTok', icon: '🎵', category: 'Social' },
+    { name: 'YouTube', icon: '▶️', category: 'Video' },
+    { name: 'Facebook', icon: '👤', category: 'Social' },
+    { name: 'Twitter/X', icon: '🐦', category: 'Social' },
+    { name: 'Snapchat', icon: '👻', category: 'Social' },
+    { name: 'Reddit', icon: '🤖', category: 'Social' },
+    { name: 'WhatsApp', icon: '💬', category: 'Messaging' },
+    { name: 'Telegram', icon: '✈️', category: 'Messaging' },
+    { name: 'Discord', icon: '🎮', category: 'Gaming' },
+    { name: 'Twitch', icon: '📺', category: 'Gaming' },
+    { name: 'Netflix', icon: '🎬', category: 'Entertainment' },
+    { name: 'Games', icon: '🎮', category: 'Gaming' },
+  ];
+
+  const appCategories = ['All Social Media', 'All Games', 'All Entertainment', 'All Messaging'];
+
+  const addApp = (app: string) => {
+    if (app && !blockedApps.includes(app)) {
+      onUpdate({ blockedApps: [...blockedApps, app] });
+      setNewApp('');
+    }
+  };
+
+  const removeApp = (app: string) => {
+    onUpdate({ blockedApps: blockedApps.filter(a => a !== app) });
+  };
+
+  const addWebsite = () => {
+    if (newWebsite && !blockedWebsites.includes(newWebsite)) {
+      onUpdate({ blockedWebsites: [...blockedWebsites, newWebsite] });
+      setNewWebsite('');
+    }
+  };
+
+  const removeWebsite = (website: string) => {
+    onUpdate({ blockedWebsites: blockedWebsites.filter(w => w !== website) });
+  };
+
+  const addKeyword = () => {
+    if (newKeyword && !blockedKeywords.includes(newKeyword)) {
+      onUpdate({ blockedKeywords: [...blockedKeywords, newKeyword] });
+      setNewKeyword('');
+    }
+  };
+
+  const removeKeyword = (keyword: string) => {
+    onUpdate({ blockedKeywords: blockedKeywords.filter(k => k !== keyword) });
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* Quick Content Blocks */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Shield className="h-4 w-4" />
+            Content Protection
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center justify-between p-3 bg-muted rounded-xl">
+            <div className="flex items-center gap-3">
+              <Film className="h-5 w-5 text-rose-500" />
+              <div>
+                <p className="font-medium text-sm">Shorts & Reels Blocker</p>
+                <p className="text-xs text-muted-foreground">Block infinite scroll content</p>
+              </div>
+            </div>
+            <Switch 
+              checked={blockInfiniteContent}
+              onCheckedChange={(checked) => onUpdate({ blockInfiniteContent: checked })}
+            />
+          </div>
+
+          <div className="flex items-center justify-between p-3 bg-muted rounded-xl">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <div>
+                <p className="font-medium text-sm">Adult Content Blocker</p>
+                <p className="text-xs text-muted-foreground">Block harmful websites</p>
+              </div>
+            </div>
+            <Switch 
+              checked={blockAdultContent}
+              onCheckedChange={(checked) => onUpdate({ blockAdultContent: checked })}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Blocking Tabs */}
+      <Tabs value={activeBlockTab} onValueChange={setActiveBlockTab}>
+        <TabsList className="w-full grid grid-cols-3">
+          <TabsTrigger value="apps" className="text-xs">
+            <Smartphone className="h-3 w-3 mr-1" />
+            Apps ({blockedApps.length})
+          </TabsTrigger>
+          <TabsTrigger value="websites" className="text-xs">
+            <Globe className="h-3 w-3 mr-1" />
+            Sites ({blockedWebsites.length})
+          </TabsTrigger>
+          <TabsTrigger value="keywords" className="text-xs">
+            <Type className="h-3 w-3 mr-1" />
+            Keywords ({blockedKeywords.length})
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="apps" className="mt-4 space-y-4">
+          {/* Category Quick Blocks */}
+          <div className="flex flex-wrap gap-2">
+            {appCategories.map((cat) => (
+              <Badge
+                key={cat}
+                variant={blockedApps.includes(cat) ? 'default' : 'outline'}
+                className="cursor-pointer"
+                onClick={() => blockedApps.includes(cat) ? removeApp(cat) : addApp(cat)}
+              >
+                {cat}
+              </Badge>
+            ))}
+          </div>
+
+          {/* Popular Apps Grid */}
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">Popular Apps</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-4 gap-2">
+                {popularApps.map((app) => (
+                  <button
+                    key={app.name}
+                    onClick={() => blockedApps.includes(app.name) ? removeApp(app.name) : addApp(app.name)}
+                    className={cn(
+                      'flex flex-col items-center p-2 rounded-xl transition-all',
+                      blockedApps.includes(app.name) 
+                        ? 'bg-destructive/20 border-2 border-destructive' 
+                        : 'bg-muted hover:bg-muted/80'
+                    )}
+                  >
+                    <span className="text-2xl mb-1">{app.icon}</span>
+                    <span className="text-[10px] text-center truncate w-full">{app.name}</span>
+                    {blockedApps.includes(app.name) && (
+                      <Ban className="h-3 w-3 text-destructive mt-1" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Custom App Input */}
+          <div className="flex gap-2">
+            <Input
+              placeholder="Add custom app..."
+              value={newApp}
+              onChange={(e) => setNewApp(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addApp(newApp)}
+            />
+            <Button onClick={() => addApp(newApp)} size="icon">
+              <Plus className="h-4 w-4" />
+            </Button>
+          </div>
+
+          {/* Blocked Apps List */}
+          {blockedApps.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Ban className="h-4 w-4 text-destructive" />
+                  Blocked Apps ({blockedApps.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex flex-wrap gap-2">
+                  {blockedApps.map((app) => (
+                    <Badge key={app} variant="destructive" className="gap-1">
+                      {app}
+                      <X 
+                        className="h-3 w-3 cursor-pointer" 
+                        onClick={() => removeApp(app)}
+                      />
+                    </Badge>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        <TabsContent value="websites" className="mt-4 space-y-4">
+          <Card>
+            <CardContent className="pt-4">
+              <p className="text-sm text-muted-foreground mb-4">
+                Block websites by domain, subdomain, or use wildcards (*) for patterns.
+              </p>
+
+              <div className="space-y-3">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="e.g., instagram.com or *.tiktok.com"
+                    value={newWebsite}
+                    onChange={(e) => setNewWebsite(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addWebsite()}
+                  />
+                  <Button onClick={addWebsite} size="icon">
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                {blockedWebsites.length > 0 && (
+                  <div className="space-y-2">
+                    {blockedWebsites.map((website) => (
+                      <div 
+                        key={website}
+                        className="flex items-center justify-between p-2 bg-destructive/10 rounded-lg"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Globe className="h-4 w-4 text-destructive" />
+                          <span className="text-sm">{website}</span>
+                        </div>
+                        <Button 
+                          variant="ghost" 
+                          size="icon"
+                          className="h-6 w-6"
+                          onClick={() => removeWebsite(website)}
+                        >
+                          <Trash2 className="h-3 w-3 text-destructive" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Quick Website Blocks */}
+          <div className="flex flex-wrap gap-2">
+            {['facebook.com', 'instagram.com', 'tiktok.com', 'twitter.com', 'reddit.com', 'youtube.com'].map((site) => (
+              <Badge
+                key={site}
+                variant={blockedWebsites.includes(site) ? 'destructive' : 'outline'}
+                className="cursor-pointer"
+                onClick={() => blockedWebsites.includes(site) ? removeWebsite(site) : onUpdate({ blockedWebsites: [...blockedWebsites, site] })}
+              >
+                <Globe className="h-3 w-3 mr-1" />
+                {site}
+              </Badge>
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="keywords" className="mt-4 space-y-4">
+          <Card>
+            <CardContent className="pt-4">
+              <p className="text-sm text-muted-foreground mb-4">
+                Block content containing specific keywords in URLs or search queries.
+              </p>
+
+              <div className="flex gap-2 mb-4">
+                <Input
+                  placeholder="e.g., shorts, reels, gaming"
+                  value={newKeyword}
+                  onChange={(e) => setNewKeyword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
+                />
+                <Button onClick={addKeyword} size="icon">
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+
+              {blockedKeywords.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {blockedKeywords.map((keyword) => (
+                    <Badge key={keyword} variant="destructive" className="gap-1">
+                      <Type className="h-3 w-3" />
+                      {keyword}
+                      <X 
+                        className="h-3 w-3 cursor-pointer" 
+                        onClick={() => removeKeyword(keyword)}
+                      />
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Suggested Keywords */}
+          <div className="flex flex-wrap gap-2">
+            {['shorts', 'reels', 'stories', 'gaming', 'memes', 'viral', 'trending'].map((kw) => (
+              <Badge
+                key={kw}
+                variant={blockedKeywords.includes(kw) ? 'destructive' : 'outline'}
+                className="cursor-pointer"
+                onClick={() => blockedKeywords.includes(kw) ? removeKeyword(kw) : onUpdate({ blockedKeywords: [...blockedKeywords, kw] })}
+              >
+                {kw}
+              </Badge>
+            ))}
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

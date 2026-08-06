@@ -1,0 +1,35 @@
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    - cron: '0 0 * * *'   # 06:00 BD
+    - cron: '0 8 * * *'   # 14:00 BD
+    - cron: '0 16 * * *'  # 22:00 BD
+  workflow_dispatch:
+
+jobs:
+  ping:
+    name: Ping Supabase
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    env:
+      SUPABASE_URL: "https://nxvtoviyldffcqbtgriw.supabase.co"
+      SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im54dnRvdml5bGRmZmNxYnRncml3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc0Njc3MDksImV4cCI6MjA4MzA0MzcwOX0.--MB5qt_OKqy3TAdeoyGfXW71wz0xNBv7i9oWVOvPpI"
+
+    steps:
+      - name: Ping auth health (no auth required)
+        run: |
+          curl -sS -o /dev/null -w "auth/health -> %{http_code} | %{time_total}s\n" \
+            "$SUPABASE_URL/auth/v1/health"
+
+      - name: Ping REST with apikey (keeps DB warm)
+        run: |
+          curl -sS -o /dev/null -w "rest profiles -> %{http_code} | %{time_total}s\n" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY" \
+            -H "Accept: application/json" \
+            -H "Range: 0-0" \
+            "$SUPABASE_URL/rest/v1/profiles?select=user_id&limit=1"
+
+      - name: Report time
+        run: date -u

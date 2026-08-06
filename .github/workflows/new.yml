@@ -1,0 +1,135 @@
+name: 🚀 Build Signed Release LifeOS
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: 📱 Build Signed Release APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js v22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Setup Java v21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Cache Gradle Packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Build Web Assets
+        run: npm run build
+
+      - name: Sync Capacitor Android
+        run: npx cap sync android
+
+      - name: Fix Gradle Permissions
+        run: chmod +x android/gradlew
+
+      # ── PRE-BUILD DIAGNOSTICS ─────────────────────────────────────────────
+      # Prove the keystore exists at the exact path storeFile resolves to,
+      # BEFORE gradle runs. If this step fails, the signing config would
+      # silently be dropped and we'd produce an unsigned APK.
+      - name: Verify keystore is present
+        run: |
+          set -e
+          KS="android/app/mylifeos-release.keystore"
+          echo "── Keystore path check ──"
+          ls -la "$KS"
+          SIZE=$(stat -c%s "$KS")
+          echo "keystore size: $SIZE bytes"
+          if [ "$SIZE" -lt 100 ]; then
+            echo "::error::Keystore file is suspiciously small ($SIZE bytes) — likely a Git LFS pointer or corruption."
+            head -c 200 "$KS"; echo
+            exit 1
+          fi
+          echo "── Keystore contents (keytool -list) ──"
+          keytool -list -keystore "$KS" -storepass lifeos123 -v | head -30
+          echo "── Signing config sanity ──"
+          grep -n "signingConfig" android/app/build.gradle
+          grep -n "storeFile"     android/app/build.gradle
+
+      # Build the SIGNED release APK. --info surfaces the packageRelease /
+      # signRelease task lines in the log so we can confirm signing ran.
+      - name: Build Signed Release APK
+        run: |
+          set -eo pipefail
+          cd android
+          ./gradlew assembleRelease \
+            -PversionCode=${{ github.run_number }} \
+            -PversionName=1.0.${{ github.run_number }} \
+            --no-daemon --stacktrace --info 2>&1 | tee gradle-build.log
+          echo "── Signing-related task lines ──"
+          grep -Ei "sign|package.*release|zipalign" gradle-build.log | tail -40 || true
+
+      - name: Verify APK exists
+        run: ls -la android/app/build/outputs/apk/release/
+
+      # ── HARD SIGNATURE GATE ───────────────────────────────────────────────
+      # apksigner is the source of truth for Android APK signatures. If the
+      # APK is unsigned OR missing v2 signature, FAIL the workflow so we can
+      # never silently publish an uninstallable APK again.
+      - name: Verify APK is signed (apksigner)
+        run: |
+          set -e
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          BUILD_TOOLS_DIR=$(ls -d $ANDROID_SDK_ROOT/build-tools/* 2>/dev/null | sort -V | tail -1)
+          if [ -z "$BUILD_TOOLS_DIR" ]; then
+            BUILD_TOOLS_DIR=$(ls -d $ANDROID_HOME/build-tools/* 2>/dev/null | sort -V | tail -1)
+          fi
+          echo "Using build-tools: $BUILD_TOOLS_DIR"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          echo "── META-INF contents (should list *.RSA + *.SF) ──"
+          unzip -l "$APK" | grep -E "META-INF/" || true
+          echo "── apksigner verify --verbose ──"
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+          echo "── apksigner verify (strict exit code) ──"
+          if ! "$APKSIGNER" verify "$APK"; then
+            echo "::error::APK IS UNSIGNED. Refusing to publish."
+            exit 1
+          fi
+          echo "✅ APK signature verified."
+
+      - name: Rename to LifeOS.apk
+        run: mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/LifeOS.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LifeOS-APK
+          path: android/app/build/outputs/apk/release/LifeOS.apk
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: LifeOS Release 1.0.${{ github.run_number }}
+          files: android/app/build/outputs/apk/release/LifeOS.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B0B22"
+    android:gravity="center"
+    android:padding="32dp">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="🌙"
+        android:textSize="64sp"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:id="@+id/n2r_title"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Sleep to Rise"
+        android:textColor="#FFFFFF"
+        android:textSize="26sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/n2r_message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:gravity="center"
+        android:textColor="#C7D2FE"
+        android:textSize="16sp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:text="Ends in"
+        android:textColor="#94A3B8"
+        android:textSize="12sp"
+        android:letterSpacing="0.15" />
+
+    <TextView
+        android:id="@+id/n2r_countdown"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="--:--"
+        android:textColor="#FFFFFF"
+        android:textSize="48sp"
+        android:fontFamily="monospace"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/n2r_home"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="40dp"
+        android:text="Go Home"
+        android:backgroundTint="#6366F1"
+        android:textColor="#FFFFFF"
+        android:paddingStart="32dp"
+        android:paddingEnd="32dp" />
+
+    <Button
+        android:id="@+id/n2r_override"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="16dp"
+        android:text="Emergency unlock"
+        style="?android:attr/borderlessButtonStyle"
+        android:textColor="#94A3B8"
+        android:textSize="12sp" />
+
+</LinearLayout>

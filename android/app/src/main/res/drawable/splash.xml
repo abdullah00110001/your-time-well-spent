@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Neutral white background so the cold-start splash does not flash blue.
+     The branded splash (logo + Life OS) is rendered by NativeSplash.tsx
+     once React mounts. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:drawable="@android:color/white" />
+</layer-list>
