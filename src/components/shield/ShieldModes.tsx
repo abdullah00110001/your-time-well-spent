@@ -8,7 +8,25 @@ import { isNative } from '@/lib/capacitor/platform';
 import { toast } from 'sonner';
 import { setPresence } from '@/hooks/useLifeosLive';
 
-type StrictnessMode = 'normal' | 'lock' | 'strict';
+// Mirrors the native ShieldModeManager vocabulary exactly ("focus" | "sleep" |
+// "strict" | "normal"). The old UI used a "lock" alias for focus and mapped
+// Sleep Mode onto "strict", so the Sleep card reported the wrong state and
+// activating Sleep looked like Strict Mode.
+export type StrictnessMode = 'normal' | 'focus' | 'sleep' | 'strict';
+
+export function normalizeShieldMode(raw: string | null | undefined): StrictnessMode {
+  switch (raw) {
+    case 'lock':
+    case 'focus':
+      return 'focus';
+    case 'sleep':
+      return 'sleep';
+    case 'strict':
+      return 'strict';
+    default:
+      return 'normal';
+  }
+}
 
 interface ShieldModesProps {
   activeMode?: StrictnessMode;
@@ -18,39 +36,53 @@ interface ShieldModesProps {
 
 export function ShieldModes({ activeMode, onModeChange, disciplineScore }: ShieldModesProps = {}) {
   const [currentMode, setCurrentMode] = useState<StrictnessMode>('normal');
-  const [isStrict, setIsStrict] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [busy, setBusy] = useState<null | 'focus' | 'sleep' | 'strict'>(null);
 
   const isControlled = activeMode !== undefined;
   const resolvedMode = isControlled ? activeMode : currentMode;
+  const isStrict = resolvedMode === 'strict';
 
+  // Pull the real mode from native on mount, and re-sync whenever the app comes
+  // back to the foreground (the mode can change from the block screen or when
+  // strict mode expires at midnight).
   useEffect(() => {
-    const loadMode = async () => {
+    let cancelled = false;
+
+    const syncMode = async () => {
       if (!isNative) {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
         return;
       }
-
       try {
         const data = await Shield.getCurrentMode();
-        const nativeMode = (data.mode || 'normal') as StrictnessMode;
-        setCurrentMode(nativeMode);
-        setIsStrict(Boolean(data.strict));
+        if (cancelled) return;
+        const native = data?.strict ? 'strict' : normalizeShieldMode(data?.mode);
+        setCurrentMode(native);
+        onModeChange?.(native);
       } catch (error) {
         console.error('Failed to load shield mode', error);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
-    loadMode();
+    syncMode();
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void syncMode();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    if (activeMode) {
-      setCurrentMode(activeMode);
-      setIsStrict(activeMode === 'strict');
-    }
+    if (activeMode) setCurrentMode(activeMode);
   }, [activeMode]);
 
   const modeDescription = useMemo(() => {
@@ -60,14 +92,23 @@ export function ShieldModes({ activeMode, onModeChange, disciplineScore }: Shiel
 
   const applyMode = (mode: StrictnessMode) => {
     setCurrentMode(mode);
-    setIsStrict(mode === 'strict');
     onModeChange?.(mode);
   };
 
+  const nativeError = (error: unknown, fallback: string) =>
+    toast.error(
+      typeof error === 'string' ? error : (error as any)?.message || fallback,
+    );
+
   const toggleMode = async (modeName: 'focus' | 'sleep') => {
-    const targetMode: StrictnessMode = modeName === 'focus' ? 'lock' : 'strict';
+    if (busy) return;
+    if (!isNative) {
+      toast.info('Shield modes are only available in the Android app.');
+      return;
+    }
+    setBusy(modeName);
     try {
-      if (resolvedMode === targetMode) {
+      if (resolvedMode === modeName) {
         await Shield.deactivateMode();
         applyMode('normal');
         toast.info('Shield returned to Normal Mode');
@@ -85,15 +126,26 @@ export function ShieldModes({ activeMode, onModeChange, disciplineScore }: Shiel
         await setPresence({ status: 'sleeping' });
       }
 
-      applyMode(targetMode);
+      applyMode(modeName);
     } catch (error) {
-      toast.error(`Failed to activate ${modeName} mode`);
+      nativeError(error, `Failed to activate ${modeName} mode`);
+    } finally {
+      setBusy(null);
     }
   };
 
   const toggleStrictMode = async (checked: boolean) => {
+    if (busy) return;
+    if (!isNative) {
+      toast.info('Strict Mode is only available in the Android app.');
+      return;
+    }
+    setBusy('strict');
     try {
       if (!checked) {
+        // Native is the source of truth: it rejects while strict mode is still
+        // in force, so the switch snaps back instead of lying.
+        await Shield.deactivateMode();
         applyMode('normal');
         toast.info('Strict Mode Disabled');
         return;
@@ -103,7 +155,14 @@ export function ShieldModes({ activeMode, onModeChange, disciplineScore }: Shiel
       applyMode('strict');
       toast.success('Strict Mode Activated: Shield cannot be bypassed!');
     } catch (error) {
-      toast.error('Failed to toggle Strict Mode');
+      nativeError(error, 'Failed to toggle Strict Mode');
+      // Re-read native state so the UI matches reality after a rejection.
+      try {
+        const data = await Shield.getCurrentMode();
+        applyMode(data?.strict ? 'strict' : normalizeShieldMode(data?.mode));
+      } catch {}
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -123,23 +182,25 @@ export function ShieldModes({ activeMode, onModeChange, disciplineScore }: Shiel
       </div>
 
       <ModeCard
-        active={resolvedMode === 'lock'}
+        active={resolvedMode === 'focus'}
         icon={<Brain className="h-4 w-4" />}
         title="Focus Mode"
-        subtitle="Customized blocking enabled"
-        actionLabel={resolvedMode === 'lock' ? 'Active' : 'Enable'}
+        subtitle="Blocks the big distraction apps"
+        actionLabel={resolvedMode === 'focus' ? 'Active' : 'Enable'}
         onAction={() => toggleMode('focus')}
-        disabled={isStrict}
+        disabled={isStrict || busy !== null}
+        loading={busy === 'focus'}
       />
 
       <ModeCard
-        active={resolvedMode === 'normal'}
+        active={resolvedMode === 'sleep'}
         icon={<Moon className="h-4 w-4" />}
         title="Sleep Mode"
-        subtitle="Custom block list active"
-        actionLabel={resolvedMode === 'normal' ? 'Active' : 'Enable'}
+        subtitle="Focus list plus late-night apps"
+        actionLabel={resolvedMode === 'sleep' ? 'Active' : 'Enable'}
         onAction={() => toggleMode('sleep')}
-        disabled={isStrict}
+        disabled={isStrict || busy !== null}
+        loading={busy === 'sleep'}
       />
 
       <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/30 mt-4">
@@ -153,7 +214,11 @@ export function ShieldModes({ activeMode, onModeChange, disciplineScore }: Shiel
               <p className="text-[10px] text-muted-foreground">Irreversible until tomorrow</p>
             </div>
           </div>
-          <Switch checked={isStrict} onCheckedChange={toggleStrictMode} />
+          <Switch
+            checked={isStrict}
+            disabled={busy !== null}
+            onCheckedChange={toggleStrictMode}
+          />
         </div>
         <p className="text-xs text-destructive/90 leading-relaxed flex items-start gap-1.5 mt-2">
           <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
@@ -172,9 +237,10 @@ interface ModeCardProps {
   actionLabel: string;
   onAction: () => void;
   disabled?: boolean;
+  loading?: boolean;
 }
 
-function ModeCard({ active, icon, title, subtitle, actionLabel, onAction, disabled }: ModeCardProps) {
+function ModeCard({ active, icon, title, subtitle, actionLabel, onAction, disabled, loading }: ModeCardProps) {
   return (
     <Card className={`bg-card border border-border p-4 rounded-xl transition-all ${active ? 'ring-1 ring-primary/40' : ''}`}>
       <div className="flex items-center justify-between gap-3">
@@ -191,7 +257,7 @@ function ModeCard({ active, icon, title, subtitle, actionLabel, onAction, disabl
           onClick={onAction}
           disabled={disabled}
         >
-          {actionLabel}
+          {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : actionLabel}
         </Button>
       </div>
     </Card>

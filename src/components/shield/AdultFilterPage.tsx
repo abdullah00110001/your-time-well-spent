@@ -218,15 +218,12 @@ export function AdultFilterPage({ onBack, isActive }: AdultFilterPageProps) {
           style: selectedScreen,
           customMessage: selectedScreen === 'custom' ? customMessage : getDefaultMessage(selectedScreen),
         });
-        // Sync keywords, sites, apps to native
-        try {
-          await ShieldPlugin.setBlockedKeywords?.({ keywords });
-          await ShieldPlugin.setBlockedSites?.({ sites });
-          await ShieldPlugin.setBlockedApps?.({ packages: selectedApps });
-          await ShieldPlugin.setEscalationBase?.({ minutes: baseMinutes });
-        } catch (e) {
-          // native methods may not exist yet — ignore
-        }
+        // Sync keywords, sites, apps + escalation to native using the real
+        // plugin method names.
+        await ShieldPlugin.blockKeywords({ keywords });
+        await ShieldPlugin.blockSites({ sites });
+        await ShieldPlugin.blockApps({ apps: selectedApps });
+        await ShieldPlugin.setEscalationBase({ minutes: baseMinutes });
       }
       toast.success('Saved 🛡️');
       onBack();

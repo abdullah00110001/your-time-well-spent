@@ -45,8 +45,14 @@ public class ShieldModeManager {
     }
 
     public void activateStrictMode() {
-        prefs.edit().putBoolean("strict_mode", true).apply();
+        prefs.edit()
+             .putBoolean("strict_mode", true)
+             // "Irreversible until tomorrow" — store the local midnight boundary
+             // so strict mode expires by itself instead of locking forever.
+             .putLong("strict_until", nextLocalMidnightMillis())
+             .apply();
         shieldPrefs.setEnabled(true);
+        setMode("strict");
     }
 
     public void deactivateMode() {
@@ -56,8 +62,9 @@ public class ShieldModeManager {
             return; 
         }
         
-        // নরমাল মোডে ফিরে গেলে সব ব্লকড অ্যাপ ক্লিয়ার করে দেওয়া (অথবা ইউজার চাইলে ম্যানুয়ালি করতে পারে)
+        // নরমাল মোডে ফিরে গেলে সব ব্লকড অ্যাপ ক্লিয়ার করে দেওয়া (অথবা ইউজার চাইলে ম্যানুয়ালি করতে পারে)
         shieldPrefs.setBlockedApps(new HashSet<>()); 
+        prefs.edit().putBoolean("strict_mode", false).remove("strict_until").apply();
         setMode("normal");
     }
 
@@ -70,10 +77,29 @@ public class ShieldModeManager {
     }
 
     public String getCurrentMode() {
+        if (isStrictMode()) return "strict";
         return prefs.getString("current_mode", "normal");
     }
 
     public boolean isStrictMode() {
-        return prefs.getBoolean("strict_mode", false);
+        if (!prefs.getBoolean("strict_mode", false)) return false;
+        long until = prefs.getLong("strict_until", 0L);
+        if (until > 0L && System.currentTimeMillis() >= until) {
+            // Expired — clear it so the UI and disable() stop being blocked.
+            prefs.edit().putBoolean("strict_mode", false).remove("strict_until").apply();
+            return false;
+        }
+        return true;
+    }
+
+    private long nextLocalMidnightMillis() {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.add(java.util.Calendar.DAY_OF_YEAR, 1);
+        c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+        c.set(java.util.Calendar.MINUTE, 0);
+        c.set(java.util.Calendar.SECOND, 0);
+        c.set(java.util.Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
     }
 }
+

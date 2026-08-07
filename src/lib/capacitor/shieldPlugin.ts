@@ -13,14 +13,14 @@ export interface ShieldPluginInterface {
   isEnabled(): Promise<{ enabled: boolean }>;
 
   // ২. অ্যাপ ব্লকিং
+  // Native method names are exact — the old `setBlockedApps?` / `setBlockedSites?` /
+  // `setBlockedKeywords?` optional aliases did not exist in ShieldPlugin.java, so
+  // every call through them silently no-opped.
   blockApps(options: { apps: string[] }): Promise<void>;
-  setBlockedApps?(options: { packages: string[] }): Promise<void>;
   getBlockedApps(): Promise<{ apps: string[] }>;
   blockSites(options: { sites: string[] }): Promise<void>;
-  setBlockedSites?(options: { sites: string[] }): Promise<void>;
   getBlockedSites(): Promise<{ sites: string[] }>;
   blockKeywords(options: { keywords: string[] }): Promise<void>;
-  setBlockedKeywords?(options: { keywords: string[] }): Promise<void>;
   getBlockedKeywords(): Promise<{ keywords: string[] }>;
   getInstalledApps(): Promise<{ apps: InstalledApp[] }>;
   getBlockStats(): Promise<{ blockedAttemptsToday: number }>;
@@ -33,7 +33,6 @@ export interface ShieldPluginInterface {
   getCurrentMode(): Promise<{ mode: string; strict: boolean }>;
 
   // ৪. স্ট্যাটাস ও অ্যানালিটিক্স
-  getStats(options: { packageName: string }): Promise<{ blockCount: number; timeSaved: number }>;
   getScreenTimeStats(): Promise<{
     totalMinutes: number;
     totalLaunches: number;
@@ -65,7 +64,7 @@ export interface ShieldPluginInterface {
   // 🛡️ অ্যাডভান্সড প্রোটেকশন
   toggleAdultFilter(options: { enable: boolean }): Promise<void>;
   updateHardcoreSettings(options: { key: string; value: boolean }): Promise<void>;
-  setEscalationBase?(options: { minutes: number }): Promise<void>;
+  setEscalationBase(options: { minutes: number }): Promise<{ success: boolean }>;
   requestUninstall(): Promise<void>;
   getDailyHistory(): Promise<{ history: any }>;
   clearHistory(): Promise<{ success: boolean }>;
@@ -76,6 +75,7 @@ export interface ShieldPluginInterface {
     style: string;
     customMessage: string;
   }): Promise<{ success: boolean }>;
+  getAdultFilterScreen(): Promise<{ style: string; customMessage: string }>;
 
   // 🔑 Emergency Bypass & Floating Timer
   setEmergencyPin(options: { pin: string }): Promise<void>;

@@ -130,6 +130,25 @@ public class ShieldPlugin extends Plugin {
         call.resolve();
     }
 
+    /**
+     * Escalation base block duration (minutes). Can only be increased — the
+     * escalation manager rejects decreases so users can't soften the penalty.
+     */
+    @PluginMethod
+    public void setEscalationBase(PluginCall call) {
+        Integer minutes = call.getInt("minutes");
+        if (minutes == null) {
+            call.reject("Must provide minutes");
+            return;
+        }
+        boolean updated = new com.mylifeos.app.shield.ShieldEscalationManager(getContext())
+                .setBaseMinutes(minutes);
+        JSObject ret = new JSObject();
+        ret.put("success", updated);
+        call.resolve(ret);
+    }
+
+
     // ==========================================
     // 📱 BLOCKING LOGIC
     // ==========================================

@@ -9,11 +9,12 @@ import { PhotoMission }   from '@/components/rise/missions/PhotoMission';
 import { TypingMission }  from '@/components/rise/missions/TypingMission';
 import { WakeStatusModal }      from '@/components/rise/WakeStatusModal';
 import { LocationPrivacySheet } from '@/components/rise/LocationPrivacySheet';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
+
 import { isNative } from '@/lib/capacitor/platform';
-import { cancelAlarmByUuid, scheduleRecurringAlarm } from '@/lib/capacitor/nativeAlarm';
+import { cancelAlarmByUuid, scheduleAlarm, uuidToNumericId } from '@/lib/capacitor/nativeAlarm';
+import { readLocalAlarms, updateLocalAlarm } from '@/lib/rise/localAlarms';
 import { toast } from 'sonner';
-import { stopNativeRinging, clearRingingAlarmId } from '@/lib/capacitor/riseAlarmBridge';
+import { stopNativeRinging, clearRingingAlarmId, baseAlarmUuid, scheduleOneShotAlarm } from '@/lib/capacitor/riseAlarmBridge';
 import { setPresence } from '@/hooks/useLifeosLive';
 import { supabase } from '@/integrations/supabase/client';
 import { App } from '@capacitor/app';
@@ -46,7 +47,10 @@ const PER_PROBLEM_SECONDS: Record<string, number> = { easy: 120, medium: 60, har
 const VALID_MISSIONS = ['math', 'shake', 'qr', 'barcode', 'photo', 'typing'];
 
 export default function RiseRingScreen() {
-  const { id } = useParams<{ id: string }>();
+  const { id: rawId } = useParams<{ id: string }>();
+  // Native deep-links carry the suffixed uuid (`<id>_day3`, `<id>-snooze`),
+  // so always resolve to the base alarm id before any lookup.
+  const id = baseAlarmUuid(rawId) || rawId;
   const navigate = useNavigate();
 
   const [alarm,            setAlarm]            = useState<LocalAlarm | null>(null);
@@ -66,23 +70,26 @@ export default function RiseRingScreen() {
     setPresence({ status: phase === 'wake' ? 'waking' : 'in_rise_mission' });
   }, [phase]);
 
+  // Back button is suppressed while ringing. No re-navigation loop on
+  // background: the native AlarmSoundService keeps the alarm alive, and
+  // re-navigating to the current route did nothing but churn the router.
   useEffect(() => {
-    const handler = App.addListener('backButton', () => {
+    let cancelled = false;
+    const handles: Array<{ remove: () => void }> = [];
+
+    App.addListener('backButton', () => {
       if (isCompletedRef.current) return;
       toast.error('Complete the mission to dismiss', { duration: 1000 });
+    }).then((h) => {
+      if (cancelled) { h.remove(); return; }
+      handles.push(h);
     });
-    const stateHandler = App.addListener('appStateChange', ({ isActive }) => {
-      if (!isActive && phase === 'wake' && !isCompletedRef.current) {
-        setTimeout(() => {
-          if (!isCompletedRef.current) navigate(`/rise/ring/${id}`, { replace: true });
-        }, 500);
-      }
-    });
+
     return () => {
-      handler.then(h => h.remove());
-      stateHandler.then(h => h.remove());
+      cancelled = true;
+      handles.forEach((h) => h.remove());
     };
-  }, [id, phase, navigate]);
+  }, []);
 
   useEffect(() => {
     if (!isNative || hasClearedRinging.current) return;
@@ -93,7 +100,7 @@ export default function RiseRingScreen() {
   // ✅ alarm load — alarm-specific config প্রায়োরিটি পায়
   useEffect(() => {
     try {
-      const stored = JSON.parse(localStorage.getItem('local_alarms') || '[]');
+      const stored = readLocalAlarms();
       const found  = stored.find((a: any) => String(a.id) === String(id));
       if (found) {
         let cfg = found.mission_config ?? null;
@@ -121,47 +128,45 @@ export default function RiseRingScreen() {
     } catch (e) { console.error('Error loading alarm:', e); }
   }, [id]);
 
+  // Clock only renders HH:MM — tick on the minute boundary, not every second.
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(t);
+    let timer: number;
+    const tick = () => {
+      setNow(new Date());
+      const msToNextMinute = 60000 - (Date.now() % 60000);
+      timer = window.setTimeout(tick, msToNextMinute + 20);
+    };
+    const msToNextMinute = 60000 - (Date.now() % 60000);
+    timer = window.setTimeout(tick, msToNextMinute + 20);
+    return () => clearTimeout(timer);
   }, []);
 
+  // Sound + vibration ownership:
+  //  • native  → AlarmSoundService (started by RiseAlarmReceiver) owns both.
+  //              Running a JS haptics loop on top of it double-buzzed the
+  //              device and fought the native pattern, so JS stays out.
+  //  • web/dev → the browser audio element is the only source.
   useEffect(() => {
-    if (!alarm) return;
+    if (!alarm || isNative) return;
     const extraLoud = alarm.extra_loud === true;
-    const vibrate   = alarm.vibration_enabled !== false;
-
-    if (!isNative) {
-      try {
-        const audio = new Audio(alarm.ringtone_url || '');
-        audio.loop = true;
-        audio.volume = extraLoud ? 1.0 : 0.6;
-        audio.play().catch(() => {});
-        audioRef.current = audio;
-      } catch {}
-    }
-
-    if (vibrate && isNative) {
-      const buzz = async () => {
-        try {
-          await Haptics.impact({ style: ImpactStyle.Heavy });
-          if (extraLoud) setTimeout(() => Haptics.impact({ style: ImpactStyle.Heavy }).catch(() => {}), 180);
-        } catch {}
-      };
-      buzz();
-      vibrationTimer.current = window.setInterval(buzz, extraLoud ? 900 : 1500);
-    }
+    try {
+      const audio = new Audio(alarm.ringtone_url || '');
+      audio.loop = true;
+      audio.volume = extraLoud ? 1.0 : 0.6;
+      audio.play().catch(() => {});
+      audioRef.current = audio;
+    } catch {}
 
     return () => {
       audioRef.current?.pause();
       audioRef.current = null;
-      if (vibrationTimer.current) { clearInterval(vibrationTimer.current); vibrationTimer.current = null; }
     };
   }, [alarm]);
 
   const stopAlarm = async () => {
     audioRef.current?.pause();
-    if (vibrationTimer.current) clearInterval(vibrationTimer.current);
+    audioRef.current = null;
+    if (vibrationTimer.current) { clearInterval(vibrationTimer.current); vibrationTimer.current = null; }
     try { await stopNativeRinging(); } catch {}
     try { await clearRingingAlarmId(); } catch {}
   };
@@ -173,7 +178,6 @@ export default function RiseRingScreen() {
 
     if (alarm?.id && alarm.id !== 'fallback') {
       try {
-        await cancelAlarmByUuid(alarm.id);
         await cancelAlarmByUuid(`${alarm.id}-snooze`);
         await cancelAlarmByUuid(`${alarm.id}-followup`);
       } catch {}
@@ -198,25 +202,35 @@ export default function RiseRingScreen() {
     if (snoozesLeft <= 0) { toast.error('No snoozes left.'); setPhase('mission'); return; }
     await stopAlarm();
 
-    const mins     = alarm.snooze_interval_minutes ?? 5;
-    const next     = new Date(Date.now() + mins * 60 * 1000);
-    const nextTime = `${String(next.getHours()).padStart(2,'0')}:${String(next.getMinutes()).padStart(2,'0')}`;
+    const mins = alarm.snooze_interval_minutes ?? 5;
+    const next = new Date(Date.now() + mins * 60 * 1000);
 
+    // Absolute one-shot: the old recurring path resolved "next occurrence of
+    // this weekday", so a snooze across midnight could land up to 6 days out.
     try {
-      await scheduleRecurringAlarm(`${alarm.id}-snooze`, nextTime, [next.getDay()], {
-        title: alarm.label || 'Rise Alarm',
-        body: alarm.intention || 'Snooze over!',
-        missionType: (alarm.verification_type as any) ?? 'none',
-        extraLoud: alarm.extra_loud ?? false,
-        snoozeMinutes: mins,
-      });
-    } catch {}
+      if (isNative) {
+        await scheduleOneShotAlarm(`${alarm.id}-snooze`, next, {
+          title: alarm.label || 'Rise Alarm',
+          body: alarm.intention || 'Snooze over!',
+          extraLoud: alarm.extra_loud ?? false,
+          soundUri: alarm.ringtone_url ?? null,
+        });
+      } else {
+        await scheduleAlarm({
+          id: uuidToNumericId(`${alarm.id}-snooze`),
+          title: alarm.label || 'Rise Alarm',
+          body: alarm.intention || 'Snooze over!',
+          scheduledAt: next,
+          missionType: (alarm.verification_type as any) ?? 'none',
+          extraLoud: alarm.extra_loud ?? false,
+          snoozeMinutes: mins,
+          alarmDbId: alarm.id,
+        });
+      }
+    } catch (e) { console.error('[Rise] snooze schedule failed', e); }
 
-    try {
-      const stored = JSON.parse(localStorage.getItem('local_alarms') || '[]');
-      const idx = stored.findIndex((a: any) => String(a.id) === String(alarm.id));
-      if (idx >= 0) { stored[idx].snooze_limit = Math.max(0, snoozesLeft - 1); localStorage.setItem('local_alarms', JSON.stringify(stored)); }
-    } catch {}
+    updateLocalAlarm(alarm.id, { snooze_limit: Math.max(0, snoozesLeft - 1) });
+
 
     setSnoozesLeft(n => Math.max(0, n - 1));
     toast.success(`Snoozed for ${mins} minutes`);
