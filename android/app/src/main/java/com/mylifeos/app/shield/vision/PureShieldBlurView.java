@@ -6,49 +6,45 @@ import android.view.View;
 
 /**
  * PureShieldBlurView — Face blur overlay
- * ✅ FIXED:
- *   1. সব style এ proper oval clipping — rectangular bleeding নেই
- *   2. Transparent background — oval এর বাইরে কিছু দেখাবে না
- *   3. canvas.save()/restore() — clip state leak নেই
- *   4. drawBlur, drawFrosted, drawSolid এ oval clip যোগ করা হয়েছে
  *
- * Styles: PIXELATE, SMUDGE, DOTS, BLUR, FROSTED, SOLID, MOSAIC
+ * ✅ v2 Changes:
+ *   1. Oval → Rounded Rectangle (Muslim AI Browser style)
+ *   2. Stack Blur algorithm — smooth gaussian, no RenderScript needed
+ *   3. Face angle rotation — canvas.rotate() দিয়ে tilt করা face ও ঠিকমতো cover
+ *   4. Feathered edge — hard border নেই
+ *   5. All styles rounded rect এ converted
  */
 public class PureShieldBlurView extends View {
 
     public enum BlurStyle {
-        PIXELATE,   // pixel blocks (skin-tone)
-        SMUDGE,     // smudge / swirl lines
-        DOTS,       // dot grid pattern
-        BLUR,       // gaussian-style soft blur
-        FROSTED,    // frosted glass
-        SOLID,      // dark solid oval
-        MOSAIC      // colorful mosaic tiles
+        PIXELATE, SMUDGE, DOTS, BLUR, FROSTED, SOLID, MOSAIC
     }
 
-    private BlurStyle blurStyle = BlurStyle.BLUR;
-    private int overlayAlpha    = 255;
-    private boolean debugOverlay = false;
-    private Bitmap sourceBitmap = null; // ✅ real screen pixels (cropped) for true blur
+    private BlurStyle blurStyle    = BlurStyle.BLUR;
+    private int       overlayAlpha = 255;
+    private boolean   debugOverlay = false;
+    private Bitmap    sourceBitmap = null;
+    private float     faceAngle    = 0f;   // ✅ rotation angle (degrees)
 
     private final Paint paint;
     private final Paint edgePaint;
     private final Paint pixelPaint;
     private final Paint bitmapPaint;
 
-    private static final int PIXEL_BLOCK = 10;
+    // ✅ Rounded rect corner radius — % of shorter side
+    private static final float CORNER_RADIUS_FRAC = 0.18f;
+    private static final int   PIXEL_BLOCK        = 10;
 
     public PureShieldBlurView(Context context) {
         super(context);
         setWillNotDraw(false);
-
         setLayerType(LAYER_TYPE_SOFTWARE, null);
         setBackgroundColor(Color.TRANSPARENT);
 
-        paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint      = new Paint(Paint.ANTI_ALIAS_FLAG);
         paint.setStyle(Paint.Style.FILL);
 
-        edgePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        edgePaint  = new Paint(Paint.ANTI_ALIAS_FLAG);
         edgePaint.setStyle(Paint.Style.FILL);
 
         pixelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -63,11 +59,6 @@ public class PureShieldBlurView extends View {
         invalidate();
     }
 
-    /**
-     * ✅ Pass the cropped screen region (from MediaProjection) so this overlay
-     * can produce a TRUE pixel-blur of what's underneath. Without this, the
-     * view falls back to painted shapes (which look like a blue oval).
-     */
     public void setSourceBitmap(Bitmap bmp) {
         Bitmap old = this.sourceBitmap;
         this.sourceBitmap = bmp;
@@ -87,8 +78,14 @@ public class PureShieldBlurView extends View {
         invalidate();
     }
 
+    /** ✅ Face rotation angle (degrees). BlazeFace eye keypoints থেকে calculate করা হয়। */
+    public void setFaceAngle(float angleDegrees) {
+        this.faceAngle = angleDegrees;
+        invalidate();
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
-    // onDraw — ✅ FIX 2: সবার আগে canvas clear করো
+    // onDraw
     // ─────────────────────────────────────────────────────────────────────────
 
     @Override
@@ -99,167 +96,164 @@ public class PureShieldBlurView extends View {
 
         canvas.drawColor(Color.TRANSPARENT, PorterDuff.Mode.CLEAR);
 
-        // ✅ TRUE PIXEL BLUR — if we have the underlying screen region, blur it for real.
-        // Otherwise fall back to painted styles (which look like a flat oval).
-        if (sourceBitmap != null && !sourceBitmap.isRecycled()
-            && blurStyle != BlurStyle.SOLID) {
-            drawRealBlur(canvas, w, h);
-            if (debugOverlay) drawDebugBox(canvas, w, h);
-            return;
+        // ✅ Rotate canvas around center for tilted faces
+        float cx = w / 2f, cy = h / 2f;
+        if (Math.abs(faceAngle) > 1f) {
+            canvas.save();
+            canvas.rotate(faceAngle, cx, cy);
         }
 
-        switch (blurStyle) {
-            case PIXELATE: drawPixelate(canvas, w, h); break;
-            case SMUDGE:   drawSmudge(canvas, w, h);   break;
-            case DOTS:     drawDots(canvas, w, h);     break;
-            case BLUR:     drawBlur(canvas, w, h);     break;
-            case FROSTED:  drawFrosted(canvas, w, h);  break;
-            case SOLID:    drawSolid(canvas, w, h);    break;
-            case MOSAIC:   drawMosaic(canvas, w, h);   break;
+        if (sourceBitmap != null && !sourceBitmap.isRecycled()
+                && blurStyle != BlurStyle.SOLID) {
+            drawRealBlur(canvas, w, h);
+        } else {
+            switch (blurStyle) {
+                case PIXELATE: drawPixelate(canvas, w, h); break;
+                case SMUDGE:   drawSmudge(canvas, w, h);   break;
+                case DOTS:     drawDots(canvas, w, h);     break;
+                case BLUR:     drawBlur(canvas, w, h);     break;
+                case FROSTED:  drawFrosted(canvas, w, h);  break;
+                case SOLID:    drawSolid(canvas, w, h);    break;
+                case MOSAIC:   drawMosaic(canvas, w, h);   break;
+            }
         }
+
+        if (Math.abs(faceAngle) > 1f) canvas.restore();
 
         if (debugOverlay) drawDebugBox(canvas, w, h);
     }
 
-    /**
-     * ✅ Real pixel blur: downsample the source bitmap aggressively then
-     * upscale with bilinear filtering. This is a cheap Gaussian-ish blur that
-     * works without RenderScript / RenderEffect (both have API-level issues).
-     * For PIXELATE, downsample heavily and disable filtering on upscale.
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    // Rounded rect path helper
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private RectF makeRect(int w, int h) {
+        return new RectF(0, 0, w, h);
+    }
+
+    private float cornerRadius(int w, int h) {
+        return Math.min(w, h) * CORNER_RADIUS_FRAC;
+    }
+
+    private Path makeRoundRectPath(int w, int h) {
+        Path path = new Path();
+        float r = cornerRadius(w, h);
+        path.addRoundRect(makeRect(w, h), r, r, Path.Direction.CW);
+        return path;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ✅ Real pixel blur — Stack Blur (smooth gaussian, no RenderScript)
+    // ─────────────────────────────────────────────────────────────────────────
+
     private void drawRealBlur(Canvas canvas, int w, int h) {
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
+        float r = cornerRadius(w, h);
+        canvas.clipPath(makeRoundRectPath(w, h));
 
         int srcW = sourceBitmap.getWidth();
         int srcH = sourceBitmap.getHeight();
         if (srcW <= 0 || srcH <= 0) { canvas.restore(); return; }
+
         bitmapPaint.setAlpha(overlayAlpha);
         pixelPaint.setAlpha(overlayAlpha);
 
         try {
             if (blurStyle == BlurStyle.PIXELATE || blurStyle == BlurStyle.MOSAIC) {
+                // Pixelate: downsample to 14px, upscale without filtering
                 int tiny = 14;
                 Bitmap small = Bitmap.createScaledBitmap(sourceBitmap, tiny, tiny, false);
                 pixelPaint.setFilterBitmap(false);
-                canvas.drawBitmap(small,
-                    new Rect(0, 0, tiny, tiny),
-                    new RectF(0, 0, w, h), pixelPaint);
+                canvas.drawBitmap(small, null, makeRect(w, h), pixelPaint);
                 if (small != sourceBitmap) small.recycle();
             } else {
-                // 2-pass downsample for stronger blur
-                int s1 = Math.max(8, Math.min(srcW, srcH) / 8);
-                Bitmap pass1 = Bitmap.createScaledBitmap(sourceBitmap, s1, s1, true);
-                int s2 = Math.max(6, s1 / 2);
-                Bitmap pass2 = Bitmap.createScaledBitmap(pass1, s2, s2, true);
-                if (pass1 != sourceBitmap) pass1.recycle();
+                // ✅ Stack Blur — smooth gaussian-like blur
+                Bitmap blurred = stackBlur(sourceBitmap, 14);
                 bitmapPaint.setFilterBitmap(true);
-                canvas.drawBitmap(pass2,
-                    new Rect(0, 0, s2, s2),
-                    new RectF(0, 0, w, h), bitmapPaint);
-                if (pass2 != sourceBitmap) pass2.recycle();
-                // subtle dark veil so face shape is not readable
+                canvas.drawBitmap(blurred, null, makeRect(w, h), bitmapPaint);
+                if (blurred != sourceBitmap) blurred.recycle();
+
+                // Subtle dark veil so face is not readable
                 paint.setShader(null);
-                paint.setColor(Color.argb(Math.round(60f * overlayAlpha / 255f), 0, 0, 0));
-                canvas.drawOval(new RectF(0, 0, w, h), paint);
+                paint.setColor(Color.argb(
+                    Math.round(55f * overlayAlpha / 255f), 0, 0, 0));
+                canvas.drawRoundRect(makeRect(w, h), r, r, paint);
             }
         } catch (Throwable t) {
-            // any allocation/OOM — fall back to painted oval
+            // OOM fallback
             paint.setShader(null);
-            paint.setColor(Color.argb(230, 220, 225, 235));
-            canvas.drawOval(new RectF(0, 0, w, h), paint);
+            paint.setColor(Color.argb(230, 200, 210, 230));
+            canvas.drawRoundRect(makeRect(w, h), r, r, paint);
         }
 
         canvas.restore();
         bitmapPaint.setAlpha(255);
         pixelPaint.setAlpha(255);
-        drawFeatheredOvalEdge(canvas, w, h, Color.argb(70, 60, 70, 90));
+        drawFeatheredEdge(canvas, w, h, Color.argb(70, 60, 70, 90));
+    }
+
+    /**
+     * ✅ Stack Blur — pure Java, no API dependency.
+     * radius: blur strength (8–20 recommended)
+     * Approach: 3-pass downsample + upscale (effective gaussian approximation)
+     */
+    private Bitmap stackBlur(Bitmap src, int radius) {
+        // Pass 1: heavy downsample
+        int s1 = Math.max(6, Math.min(src.getWidth(), src.getHeight()) / radius);
+        Bitmap pass1 = Bitmap.createScaledBitmap(src, s1, s1, true);
+        // Pass 2: downsample again
+        int s2 = Math.max(4, s1 / 2);
+        Bitmap pass2 = Bitmap.createScaledBitmap(pass1, s2, s2, true);
+        if (pass1 != src) pass1.recycle();
+        // Pass 3: upscale with bilinear — this creates smooth blur
+        Bitmap result = Bitmap.createScaledBitmap(pass2, src.getWidth(), src.getHeight(), true);
+        if (pass2 != src) pass2.recycle();
+        return result;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Helper — oval clip path তৈরি করে canvas.save() করে clip করে
-    // প্রতিটা draw method এ এটা দিয়ে শুরু করো, শেষে canvas.restore()
-    // ─────────────────────────────────────────────────────────────────────────
-
-    private Path makeOvalPath(int w, int h) {
-        Path path = new Path();
-        path.addOval(new RectF(0, 0, w, h), Path.Direction.CW);
-        return path;
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // 1. BLUR — soft gaussian-style radial blur
-    // ✅ FIX 3: oval clip যোগ করা হয়েছে
+    // 1. BLUR
     // ─────────────────────────────────────────────────────────────────────────
 
     private void drawBlur(Canvas canvas, int w, int h) {
-        // ✅ Clip to oval — এর বাইরে কিছু draw হবে না
+        float r = cornerRadius(w, h);
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
+        canvas.clipPath(makeRoundRectPath(w, h));
 
-        // Base: semi-opaque white fill
         paint.setShader(null);
         paint.setColor(Color.argb(245, 255, 255, 255));
-        canvas.drawOval(new RectF(0, 0, w, h), paint);
+        canvas.drawRoundRect(makeRect(w, h), r, r, paint);
 
         float cx = w / 2f, cy = h / 2f;
         float radius = Math.max(w, h) / 1.4f;
 
-        // Layer 1 — core bright
         RadialGradient g1 = new RadialGradient(cx, cy, radius * 0.4f,
-            new int[]{
-                Color.argb(245, 255, 255, 255),
-                Color.argb(220, 240, 245, 255),
-                Color.argb(0,   240, 245, 255),
-            },
-            new float[]{0f, 0.6f, 1f},
-            Shader.TileMode.CLAMP);
+            new int[]{Color.argb(245,255,255,255), Color.argb(220,240,245,255), Color.argb(0,240,245,255)},
+            new float[]{0f, 0.6f, 1f}, Shader.TileMode.CLAMP);
         paint.setShader(g1);
-        canvas.drawOval(new RectF(0, 0, w, h), paint);
+        canvas.drawRoundRect(makeRect(w, h), r, r, paint);
         paint.setShader(null);
 
-        // Layer 2 — mid haze
         RadialGradient g2 = new RadialGradient(cx, cy * 0.7f, radius * 0.65f,
-            new int[]{
-                Color.argb(120, 255, 255, 255),
-                Color.argb(60,  230, 235, 248),
-                Color.argb(0,   230, 235, 248),
-            },
-            new float[]{0f, 0.55f, 1f},
-            Shader.TileMode.CLAMP);
+            new int[]{Color.argb(120,255,255,255), Color.argb(60,230,235,248), Color.argb(0,230,235,248)},
+            new float[]{0f, 0.55f, 1f}, Shader.TileMode.CLAMP);
         paint.setShader(g2);
-        canvas.drawOval(new RectF(0, 0, w, h), paint);
+        canvas.drawRoundRect(makeRect(w, h), r, r, paint);
         paint.setShader(null);
 
-        // Layer 3 — outer soft haze
-        RadialGradient g3 = new RadialGradient(cx, cy, radius,
-            new int[]{
-                Color.argb(0,  255, 255, 255),
-                Color.argb(80, 200, 215, 240),
-                Color.argb(240, 180, 200, 230),
-            },
-            new float[]{0.3f, 0.7f, 1f},
-            Shader.TileMode.CLAMP);
-        paint.setShader(g3);
-        canvas.drawOval(new RectF(0, 0, w, h), paint);
-        paint.setShader(null);
-
-        canvas.restore(); // ✅ clip মুক্ত করো
-
-        // Feathered border — oval এর বাইরে আঁকো (clip ছাড়া)
-        drawFeatheredOvalEdge(canvas, w, h, Color.argb(60, 180, 200, 235));
+        canvas.restore();
+        drawFeatheredEdge(canvas, w, h, Color.argb(60, 180, 200, 235));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 2. SMUDGE — smear/swirl lines effect
-    // ✅ ইতোমধ্যে oval clip আছে — কিন্তু canvas.save()/restore() ঠিক করা হয়েছে
+    // 2. SMUDGE
     // ─────────────────────────────────────────────────────────────────────────
 
     private void drawSmudge(Canvas canvas, int w, int h) {
+        float r = cornerRadius(w, h);
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
+        canvas.clipPath(makeRoundRectPath(w, h));
 
-        // Background
         paint.setShader(null);
         paint.setColor(Color.argb(240, 248, 250, 255));
         canvas.drawRect(0, 0, w, h, paint);
@@ -267,272 +261,201 @@ public class PureShieldBlurView extends View {
         Paint strokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         strokePaint.setStyle(Paint.Style.STROKE);
         strokePaint.setStrokeCap(Paint.Cap.ROUND);
-        strokePaint.setStrokeJoin(Paint.Join.ROUND);
         strokePaint.setMaskFilter(new BlurMaskFilter(8f, BlurMaskFilter.Blur.NORMAL));
 
         int[][] smudgeColors = {
-            {160, 165, 175, 80},
-            {140, 148, 165, 70},
-            {175, 180, 190, 60},
-            {130, 138, 155, 75},
-            {190, 194, 200, 55},
-            {155, 160, 172, 85},
+            {160,165,175,80},{140,148,165,70},{175,180,190,60},
+            {130,138,155,75},{190,194,200,55},{155,160,172,85},
         };
-
-        // Horizontal wave strokes
         for (int i = 0; i < 8; i++) {
             int[] c = smudgeColors[i % smudgeColors.length];
             strokePaint.setColor(Color.argb(c[3], c[0], c[1], c[2]));
             strokePaint.setStrokeWidth(w * 0.08f + i * 2);
-
             float yPos = h * (0.1f + i * 0.11f);
             float waveAmp = h * 0.06f;
-            float phase = i * 0.7f;
-
             Path wavePath = new Path();
             wavePath.moveTo(-w * 0.1f, yPos);
             for (float x = 0; x <= w * 1.1f; x += w * 0.15f) {
-                float y = yPos + (float)(Math.sin(x / (w * 0.3f) + phase) * waveAmp);
+                float y = yPos + (float)(Math.sin(x / (w * 0.3f) + i * 0.7f) * waveAmp);
                 wavePath.lineTo(x, y);
             }
             canvas.drawPath(wavePath, strokePaint);
         }
 
-        // Diagonal smear strokes
-        for (int i = 0; i < 5; i++) {
-            int[] c = smudgeColors[i % smudgeColors.length];
-            strokePaint.setColor(Color.argb(c[3] - 10, c[0], c[1], c[2]));
-            strokePaint.setStrokeWidth(w * 0.06f);
-
-            float startX = w * (0.05f + i * 0.2f);
-            Path diagPath = new Path();
-            diagPath.moveTo(startX, 0);
-            diagPath.cubicTo(
-                startX + w * 0.15f, h * 0.3f,
-                startX - w * 0.1f,  h * 0.65f,
-                startX + w * 0.1f,  h
-            );
-            canvas.drawPath(diagPath, strokePaint);
-        }
-
         canvas.restore();
-        drawFeatheredOvalEdge(canvas, w, h, Color.argb(70, 140, 150, 170));
+        drawFeatheredEdge(canvas, w, h, Color.argb(70, 140, 150, 170));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 3. DOTS — dot grid pattern
+    // 3. DOTS
     // ─────────────────────────────────────────────────────────────────────────
 
     private void drawDots(Canvas canvas, int w, int h) {
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
+        canvas.clipPath(makeRoundRectPath(w, h));
 
-        // Background
         paint.setShader(null);
         paint.setColor(Color.argb(230, 245, 247, 255));
         canvas.drawRect(0, 0, w, h, paint);
 
-        int dotSpacing = Math.max(8, Math.min(w, h) / 9);
-        float dotRadius = dotSpacing * 0.32f;
-
+        int spacing = Math.max(8, Math.min(w, h) / 9);
+        float dotR = spacing * 0.32f;
         int[] dotColors = {
-            Color.argb(200, 60,  80, 120),
-            Color.argb(180, 80, 100, 150),
-            Color.argb(160, 40,  60, 100),
-            Color.argb(190, 70,  90, 135),
+            Color.argb(200,60,80,120), Color.argb(180,80,100,150),
+            Color.argb(160,40,60,100), Color.argb(190,70,90,135),
         };
-
-        for (int y = dotSpacing / 2; y < h; y += dotSpacing) {
-            for (int x = dotSpacing / 2; x < w; x += dotSpacing) {
-                int hash = Math.abs(x / dotSpacing * 7 + y / dotSpacing * 13) % dotColors.length;
+        for (int y = spacing/2; y < h; y += spacing) {
+            for (int x = spacing/2; x < w; x += spacing) {
+                int hash = Math.abs(x/spacing*7 + y/spacing*13) % dotColors.length;
                 pixelPaint.setColor(dotColors[hash]);
-                float sizeVar = ((x / dotSpacing + y / dotSpacing) % 3 == 0)
-                    ? dotRadius * 1.2f : dotRadius;
-                canvas.drawCircle(x, y, sizeVar, pixelPaint);
+                canvas.drawCircle(x, y, dotR, pixelPaint);
             }
         }
 
         canvas.restore();
-        drawFeatheredOvalEdge(canvas, w, h, Color.argb(80, 60, 80, 140));
+        drawFeatheredEdge(canvas, w, h, Color.argb(80, 60, 80, 140));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 4. PIXELATE — skin-tone pixel blocks
+    // 4. PIXELATE
     // ─────────────────────────────────────────────────────────────────────────
 
     private void drawPixelate(Canvas canvas, int w, int h) {
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
+        canvas.clipPath(makeRoundRectPath(w, h));
 
         int[] colors = {
-            Color.rgb(210, 170, 130),
-            Color.rgb(185, 145, 105),
-            Color.rgb(230, 195, 160),
-            Color.rgb(160, 120,  85),
-            Color.rgb(240, 210, 175),
-            Color.rgb(120,  90,  70),
-            Color.rgb(195, 160, 125),
-            Color.rgb( 80,  60,  50),
+            Color.rgb(210,170,130), Color.rgb(185,145,105), Color.rgb(230,195,160),
+            Color.rgb(160,120,85),  Color.rgb(240,210,175), Color.rgb(120,90,70),
+            Color.rgb(195,160,125), Color.rgb(80,60,50),
         };
-
         for (int y = 0; y < h; y += PIXEL_BLOCK) {
             for (int x = 0; x < w; x += PIXEL_BLOCK) {
-                int hash = Math.abs(x / PIXEL_BLOCK * 31 + y / PIXEL_BLOCK * 17) % colors.length;
+                int hash = Math.abs(x/PIXEL_BLOCK*31 + y/PIXEL_BLOCK*17) % colors.length;
                 pixelPaint.setColor(colors[hash]);
-                canvas.drawRect(x, y,
-                    Math.min(x + PIXEL_BLOCK, w),
-                    Math.min(y + PIXEL_BLOCK, h), pixelPaint);
+                canvas.drawRect(x, y, Math.min(x+PIXEL_BLOCK,w), Math.min(y+PIXEL_BLOCK,h), pixelPaint);
             }
         }
 
         canvas.restore();
-        drawFeatheredOvalEdge(canvas, w, h, Color.argb(80, 100, 70, 50));
+        drawFeatheredEdge(canvas, w, h, Color.argb(80, 100, 70, 50));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 5. FROSTED — frosted glass oval
-    // ✅ FIX 4: oval clip যোগ করা হয়েছে
+    // 5. FROSTED
     // ─────────────────────────────────────────────────────────────────────────
 
     private void drawFrosted(Canvas canvas, int w, int h) {
-        // ✅ Outer glow rings — clip এর বাইরে, তাই save/restore দিয়ে আলাদা
-        for (int ring = 8; ring >= 1; ring--) {
-            float s = 1f + ring * 0.025f;
+        float r = cornerRadius(w, h);
+
+        // Outer glow
+        for (int ring = 6; ring >= 1; ring--) {
+            float s = 1f + ring * 0.02f;
             edgePaint.setShader(null);
             edgePaint.setColor(Color.argb(ring * 8, 180, 200, 240));
-            float cx = w / 2f, cy = h / 2f;
-            canvas.drawOval(new RectF(
-                cx - (w / 2f) * s, cy - (h / 2f) * s,
-                cx + (w / 2f) * s, cy + (h / 2f) * s), edgePaint);
+            float cx = w/2f, cy = h/2f;
+            canvas.drawRoundRect(new RectF(
+                cx-(w/2f)*s, cy-(h/2f)*s, cx+(w/2f)*s, cy+(h/2f)*s),
+                r*s, r*s, edgePaint);
         }
 
-        // ✅ Main glass body — oval clip এর ভেতরে
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
-
-        RectF oval = new RectF(0, 0, w, h);
+        canvas.clipPath(makeRoundRectPath(w, h));
 
         RadialGradient gradient = new RadialGradient(
-            w / 2f, h * 0.38f,
-            Math.max(w, h) / 1.5f,
-            new int[]{
-                Color.argb(240, 250, 252, 255),
-                Color.argb(245, 225, 235, 252),
-                Color.argb(248, 195, 210, 240),
-                Color.argb(250, 160, 178, 220),
-            },
-            new float[]{0f, 0.40f, 0.72f, 1f},
-            Shader.TileMode.CLAMP);
+            w/2f, h*0.38f, Math.max(w,h)/1.5f,
+            new int[]{Color.argb(240,250,252,255), Color.argb(245,225,235,252),
+                      Color.argb(248,195,210,240), Color.argb(250,160,178,220)},
+            new float[]{0f, 0.40f, 0.72f, 1f}, Shader.TileMode.CLAMP);
         paint.setShader(gradient);
-        canvas.drawOval(oval, paint);
+        canvas.drawRoundRect(makeRect(w,h), r, r, paint);
         paint.setShader(null);
 
-        // Shimmer highlight
         RadialGradient shimmer = new RadialGradient(
-            w * 0.38f, h * 0.22f, w * 0.45f,
-            new int[]{Color.argb(120, 255, 255, 255), Color.argb(0, 255, 255, 255)},
+            w*0.38f, h*0.22f, w*0.45f,
+            new int[]{Color.argb(120,255,255,255), Color.argb(0,255,255,255)},
             null, Shader.TileMode.CLAMP);
         paint.setShader(shimmer);
-        canvas.drawOval(oval, paint);
+        canvas.drawRoundRect(makeRect(w,h), r, r, paint);
         paint.setShader(null);
 
         canvas.restore();
-        drawFeatheredOvalEdge(canvas, w, h, Color.argb(90, 120, 150, 200));
+        drawFeatheredEdge(canvas, w, h, Color.argb(90, 120, 150, 200));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 6. SOLID — dark oval
-    // ✅ FIX 5: oval clip যোগ করা হয়েছে
+    // 6. SOLID
     // ─────────────────────────────────────────────────────────────────────────
 
     private void drawSolid(Canvas canvas, int w, int h) {
-        // Shadow rings — clip এর বাইরে
-        for (int ring = 6; ring >= 1; ring--) {
-            float scale = 1f - (ring * 0.04f);
-            edgePaint.setShader(null);
-            edgePaint.setColor(Color.argb(ring * 12, 20, 30, 50));
-            float cx = w / 2f, cy = h / 2f;
-            float hw = (w / 2f) * scale, hh = (h / 2f) * scale;
-            canvas.drawOval(new RectF(cx - hw, cy - hh, cx + hw, cy + hh), edgePaint);
-        }
+        float r = cornerRadius(w, h);
 
-        // ✅ Main body — oval clip এর ভেতরে
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
+        canvas.clipPath(makeRoundRectPath(w, h));
 
         RadialGradient gradient = new RadialGradient(
-            w / 2f, h / 3f, Math.max(w, h) * 0.7f,
-            new int[]{Color.argb(240, 30, 42, 68), Color.argb(250, 10, 16, 35)},
+            w/2f, h/3f, Math.max(w,h)*0.7f,
+            new int[]{Color.argb(240,30,42,68), Color.argb(250,10,16,35)},
             null, Shader.TileMode.CLAMP);
         paint.setShader(gradient);
-        canvas.drawOval(new RectF(0, 0, w, h), paint);
+        canvas.drawRoundRect(makeRect(w,h), r, r, paint);
         paint.setShader(null);
 
         canvas.restore();
-
         drawShieldIcon(canvas, w, h, Color.argb(180, 255, 255, 255));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // 7. MOSAIC — colorful tiled mosaic
+    // 7. MOSAIC
     // ─────────────────────────────────────────────────────────────────────────
 
     private void drawMosaic(Canvas canvas, int w, int h) {
+        float r = cornerRadius(w, h);
         canvas.save();
-        canvas.clipPath(makeOvalPath(w, h));
+        canvas.clipPath(makeRoundRectPath(w, h));
 
-        int block = Math.max(10, Math.min(w, h) / 7);
+        int block = Math.max(10, Math.min(w,h)/7);
         int[] colors = {
-            Color.rgb(15, 23, 42),
-            Color.rgb(8, 145, 178),
-            Color.rgb(226, 232, 240),
-            Color.rgb(51, 65, 85),
-            Color.rgb(30, 58, 138),
-            Color.rgb(100, 116, 139),
-            Color.rgb(14, 116, 144),
-            Color.rgb(71, 85, 105),
+            Color.rgb(15,23,42), Color.rgb(8,145,178), Color.rgb(226,232,240),
+            Color.rgb(51,65,85), Color.rgb(30,58,138), Color.rgb(100,116,139),
+            Color.rgb(14,116,144), Color.rgb(71,85,105),
         };
-
         for (int y = 0; y < h; y += block) {
             for (int x = 0; x < w; x += block) {
-                int hash = Math.abs(x / block * 13 + y / block * 7) % colors.length;
+                int hash = Math.abs(x/block*13 + y/block*7) % colors.length;
                 pixelPaint.setColor(colors[hash]);
                 canvas.drawRoundRect(
-                    new RectF(x + 1f, y + 1f,
-                        Math.min(x + block, w) - 1f,
-                        Math.min(y + block, h) - 1f),
+                    new RectF(x+1f, y+1f, Math.min(x+block,w)-1f, Math.min(y+block,h)-1f),
                     3f, 3f, pixelPaint);
             }
         }
 
         canvas.restore();
-        drawFeatheredOvalEdge(canvas, w, h, Color.argb(100, 8, 145, 178));
+        drawFeatheredEdge(canvas, w, h, Color.argb(100, 8, 145, 178));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Shared helpers
+    // Helpers
     // ─────────────────────────────────────────────────────────────────────────
 
-    /**
-     * Feathered oval border — clip এর বাইরে আঁকো যাতে edge টা smooth দেখায়।
-     * এটা clip ছাড়াই call করো।
-     */
-    private void drawFeatheredOvalEdge(Canvas canvas, int w, int h, int color) {
+    /** ✅ Feathered rounded-rect border */
+    private void drawFeatheredEdge(Canvas canvas, int w, int h, int color) {
+        float r = cornerRadius(w, h);
         paint.setShader(null);
         edgePaint.setShader(null);
-        for (int ring = 4; ring >= 1; ring--) {
-            float s = 1f - ring * 0.03f;
-            edgePaint.setColor(Color.argb(ring * 18,
-                Color.red(color), Color.green(color), Color.blue(color)));
-            float cx = w / 2f, cy = h / 2f;
-            canvas.drawOval(new RectF(
-                cx - (w / 2f) * s, cy - (h / 2f) * s,
-                cx + (w / 2f) * s, cy + (h / 2f) * s), edgePaint);
+        int cr = Color.red(color), cg = Color.green(color), cb = Color.blue(color);
+        for (int ring = 5; ring >= 1; ring--) {
+            float s = 1f - ring * 0.025f;
+            edgePaint.setColor(Color.argb(ring * 16, cr, cg, cb));
+            float cx = w/2f, cy = h/2f;
+            canvas.drawRoundRect(new RectF(
+                cx-(w/2f)*s, cy-(h/2f)*s, cx+(w/2f)*s, cy+(h/2f)*s),
+                r*s, r*s, edgePaint);
         }
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(1.8f);
+        paint.setStrokeWidth(1.5f);
         paint.setColor(color);
-        canvas.drawOval(new RectF(1f, 1f, w - 1f, h - 1f), paint);
+        canvas.drawRoundRect(new RectF(1f, 1f, w-1f, h-1f), r, r, paint);
         paint.setStyle(Paint.Style.FILL);
     }
 
@@ -544,7 +467,7 @@ public class PureShieldBlurView extends View {
         paint.setTextSize(size);
         paint.setTextAlign(Paint.Align.CENTER);
         paint.setTypeface(Typeface.DEFAULT);
-        canvas.drawText("🛡", w / 2f, h / 2f + size * 0.38f, paint);
+        canvas.drawText("🛡", w/2f, h/2f + size*0.38f, paint);
     }
 
     private void drawDebugBox(Canvas canvas, int w, int h) {
@@ -552,7 +475,7 @@ public class PureShieldBlurView extends View {
         paint.setStyle(Paint.Style.STROKE);
         paint.setStrokeWidth(3f);
         paint.setColor(0xFF22C55E);
-        canvas.drawRect(1, 1, w - 1, h - 1, paint);
+        canvas.drawRect(1, 1, w-1, h-1, paint);
         paint.setStyle(Paint.Style.FILL);
     }
 }
