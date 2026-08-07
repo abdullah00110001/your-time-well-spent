@@ -2,15 +2,20 @@
  * NightToRiseGuard — global full-screen overlay shown whenever the Night-to-Rise
  * lock window is active. Mounted once at the App root. Reads config from
  * localStorage via useNightToRise and the next rise alarm from local_alarms.
+ *
+ * PHASE 2: Strict mode is now fully enforced — instead of hiding the override,
+ * it puts the emergency unlock behind a 10 minute cool-down, so a sleepy tap
+ * can never break the night, but a real emergency is never locked out.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { Lock, Smartphone, ShieldOff, Flame, Sparkles } from 'lucide-react';
+import { Lock, Smartphone, ShieldOff, Flame, Sparkles, Hourglass } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNightToRise } from './useNightToRise';
 import { useNightToRiseStreak } from './useNightToRiseStreak';
 import { nightToRiseBridge } from '@/lib/capacitor/nightToRiseBridge';
+import { STRICT_UNLOCK_DELAY_MS } from './types';
 import { cn } from '@/lib/utils';
 
 function readNextAlarmTime(): string | null {
@@ -24,6 +29,7 @@ function readNextAlarmTime(): string | null {
 }
 
 const EXEMPT_ROUTES = ['/rise/ring', '/auth', '/reset-password'];
+const STRICT_REQUEST_KEY = 'night_to_rise_strict_request_at';
 
 export function NightToRiseGuard() {
   const { pathname } = useLocation();
@@ -34,6 +40,11 @@ export function NightToRiseGuard() {
   const [overridden, setOverridden] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [showPin, setShowPin] = useState(false);
+  const [strictRequestedAt, setStrictRequestedAt] = useState<number | null>(() => {
+    const raw = localStorage.getItem(STRICT_REQUEST_KEY);
+    const n = raw ? Number(raw) : 0;
+    return n > 0 ? n : null;
+  });
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -48,9 +59,7 @@ export function NightToRiseGuard() {
     return () => window.removeEventListener('storage', onStorage);
   }, []);
 
-  // FIX (v2): pick up breaks that happened on the NATIVE block screen (which
-  // can't call back into JS directly since the app may not be running). We
-  // check on mount and every time the app comes back to the foreground.
+  // Pick up breaks that happened on the NATIVE block screen.
   useEffect(() => {
     const checkPendingBreak = async () => {
       const broke = await nightToRiseBridge.consumePendingBreak();
@@ -76,8 +85,16 @@ export function NightToRiseGuard() {
     }
   }, [phase, alarmTime, recordCleanNight]);
 
-  // Reset override when window ends
-  useEffect(() => { if (!isLocked) setOverridden(false); }, [isLocked]);
+  // Reset override + strict request when the window ends.
+  useEffect(() => {
+    if (!isLocked) {
+      setOverridden(false);
+      setShowPin(false);
+      setPinInput('');
+      setStrictRequestedAt(null);
+      try { localStorage.removeItem(STRICT_REQUEST_KEY); } catch { /* noop */ }
+    }
+  }, [isLocked]);
 
   const message = phase === 'sleep-lock' ? config.sleepBlockMessage : config.riseBlockMessage;
 
@@ -107,57 +124,75 @@ export function NightToRiseGuard() {
     ? `${hh}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
     : `${mm}:${String(ss).padStart(2, '0')}`;
 
+  // ---- Strict mode: 10 minute delayed emergency unlock ----
+  const strictWaitMs = strictRequestedAt
+    ? Math.max(0, strictRequestedAt + STRICT_UNLOCK_DELAY_MS - now.getTime())
+    : STRICT_UNLOCK_DELAY_MS;
+  const strictReady = strictRequestedAt !== null && strictWaitMs === 0;
+  const strictWaitLabel = `${Math.floor(strictWaitMs / 60000)}:${String(Math.floor((strictWaitMs % 60000) / 1000)).padStart(2, '0')}`;
+
+  const requestStrictUnlock = useCallback(() => {
+    const ts = Date.now();
+    setStrictRequestedAt(ts);
+    try { localStorage.setItem(STRICT_REQUEST_KEY, String(ts)); } catch { /* noop */ }
+  }, []);
+
+  const canOverrideNow = !config.strictMode || strictReady;
+
   const handleEmergencyUnlock = () => {
-    if (config.strictMode) return;
+    if (!canOverrideNow) return;
     // PIN: stored at 'app_lock_pin'; fall back to allowing override without PIN
     let storedPin: string | null = null;
-    try { storedPin = localStorage.getItem('app_lock_pin'); } catch {}
+    try { storedPin = localStorage.getItem('app_lock_pin'); } catch { /* noop */ }
     if (storedPin && pinInput !== storedPin) return;
     recordBreak();
     setOverridden(true);
+    try { localStorage.removeItem(STRICT_REQUEST_KEY); } catch { /* noop */ }
   };
 
   if (!isLocked) return null;
 
+  const dawn = phase === 'rise-lock';
+
   return (
-    <div className="n2r fixed inset-0 z-[200] flex flex-col" data-phase={phase}>
-      {phase === 'rise-lock' ? (
+    <div className="n2r fixed inset-0 z-[200] flex flex-col overflow-y-auto" data-phase={phase}>
+      {dawn ? (
         <div
-          className="n2r-dawn-glow pointer-events-none absolute -bottom-32 left-1/2 h-96 w-[130%] -translate-x-1/2 rounded-full blur-3xl"
-          style={{ background: 'radial-gradient(closest-side, rgba(255,201,120,0.45), rgba(255,155,113,0.15), transparent)' }}
+          className="n2r-dawn-glow pointer-events-none absolute -bottom-32 left-1/2 h-96 w-[130%] -translate-x-1/2 rounded-full bg-warning/30 blur-3xl"
         />
       ) : (
         <div
-          className="pointer-events-none absolute -top-24 left-1/2 h-80 w-[120%] -translate-x-1/2 rounded-full blur-3xl"
-          style={{ background: 'radial-gradient(closest-side, rgba(74,59,107,0.5), transparent)' }}
+          className="pointer-events-none absolute -top-24 left-1/2 h-80 w-[120%] -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"
         />
       )}
 
-      <div className="relative flex flex-1 flex-col items-center justify-center px-6 text-center">
+      <div className="relative flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
         <div
-          className="mb-7 flex h-16 w-16 items-center justify-center rounded-3xl"
-          style={{ background: 'color-mix(in srgb, var(--n2r-moon) 12%, transparent)', color: phase === 'rise-lock' ? 'var(--n2r-gold)' : 'var(--n2r-moon)' }}
+          className={cn(
+            'mb-6 flex h-16 w-16 items-center justify-center rounded-3xl',
+            dawn ? 'bg-warning/15 text-warning' : 'bg-primary/10 text-primary',
+          )}
         >
           <Lock className="h-7 w-7" />
         </div>
 
-        <h1 className="n2r-display text-4xl leading-tight">{phase === 'sleep-lock' ? 'Rest now' : 'Ease into the day'}</h1>
-        <p className="mt-4 max-w-sm text-base n2r-muted">{message}</p>
+        <h1 className="n2r-display text-3xl leading-tight">{dawn ? 'Ease into the day' : 'Rest now'}</h1>
+        <p className="mt-3 max-w-sm text-base text-muted-foreground">{message}</p>
 
-        <div className="mt-9">
-          <div className="text-[10px] uppercase tracking-[0.2em] n2r-muted">Ends in</div>
-          <div className="n2r-mono mt-2 text-5xl font-semibold" style={{ color: 'var(--n2r-ink)' }}>{countdown}</div>
+        <div className="mt-8">
+          <div className="text-overline">Ends in</div>
+          <div className="n2r-mono mt-2 text-5xl font-bold">{countdown}</div>
         </div>
 
         {config.showStreakOnBlock && streak > 0 && (
-          <div className="n2r-pill mt-7" data-tone="dawn">
+          <div className="n2r-pill mt-6" data-tone="dawn">
             <Flame className="n2r-flame h-4 w-4" /> {streak} night{streak === 1 ? '' : 's'} protected
           </div>
         )}
 
         {config.allowedApps.length > 0 && (
-          <div className="mt-9 w-full max-w-sm">
-            <div className="mb-2 text-[10px] uppercase tracking-[0.2em] n2r-muted">Still available</div>
+          <div className="mt-8 w-full max-w-sm">
+            <div className="mb-2 text-overline">Still available</div>
             <div className="flex flex-wrap justify-center gap-2">
               {config.allowedApps.map((a) => (
                 <span key={a.id} className="n2r-pill">
@@ -170,46 +205,64 @@ export function NightToRiseGuard() {
       </div>
 
       <div className="relative px-6 pb-9">
-        {!config.strictMode ? (
-          showPin ? (
-            <div className="mx-auto max-w-xs space-y-2">
-              <input
-                type="password"
-                inputMode="numeric"
-                placeholder="Emergency PIN"
-                value={pinInput}
-                onChange={(e) => setPinInput(e.target.value)}
-                className="n2r-mono w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-center text-lg tracking-widest placeholder:opacity-40"
-                style={{ color: 'var(--n2r-ink)' }}
-              />
-              <div className="flex gap-2">
-                <Button variant="ghost" className="flex-1 n2r-muted" onClick={() => { setShowPin(false); setPinInput(''); }}>Cancel</Button>
-                <Button className="flex-1" onClick={handleEmergencyUnlock}>Unlock</Button>
+        {config.strictMode && !strictReady ? (
+          strictRequestedAt === null ? (
+            <div className="mx-auto flex max-w-xs flex-col items-center gap-3">
+              <div className="n2r-pill">
+                <ShieldOff className="h-3 w-3" /> Strict mode is on
               </div>
-              <p className="text-center text-[11px] n2r-muted">Unlocking now starts your streak over. That's alright.</p>
+              <button
+                onClick={requestStrictUnlock}
+                className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+              >
+                Request emergency unlock (10 min wait)
+              </button>
             </div>
           ) : (
-            <button
-              onClick={() => setShowPin(true)}
-              className="mx-auto block text-xs n2r-muted underline-offset-4 hover:underline"
-            >
-              Emergency unlock
-            </button>
+            <div className="mx-auto flex max-w-xs flex-col items-center gap-2">
+              <div className="n2r-pill">
+                <Hourglass className="h-3 w-3" /> Unlock available in{' '}
+                <span className="n2r-mono font-semibold">{strictWaitLabel}</span>
+              </div>
+              <p className="text-center text-[11px] text-muted-foreground">
+                Take the ten minutes. Most urges are gone by then.
+              </p>
+            </div>
           )
-        ) : (
-          <div className={cn('n2r-pill mx-auto flex w-fit')}>
-            <ShieldOff className="h-3 w-3" /> Strict mode — no override tonight
+        ) : showPin ? (
+          <div className="mx-auto max-w-xs space-y-2">
+            <input
+              type="password"
+              inputMode="numeric"
+              placeholder="Emergency PIN"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              className="n2r-mono w-full rounded-xl border border-border bg-muted/40 px-4 py-3 text-center text-lg tracking-widest text-foreground placeholder:text-muted-foreground"
+            />
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={() => { setShowPin(false); setPinInput(''); }}>Cancel</Button>
+              <Button className="flex-1" onClick={handleEmergencyUnlock}>Unlock</Button>
+            </div>
+            <p className="text-center text-[11px] text-muted-foreground">
+              Unlocking now starts your streak over. That's alright.
+            </p>
           </div>
+        ) : (
+          <button
+            onClick={() => setShowPin(true)}
+            className="mx-auto block text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Emergency unlock
+          </button>
         )}
 
-        <p className="mt-4 text-center text-[11px] n2r-muted">
+        <p className="mt-4 text-center text-[11px] text-muted-foreground">
           Phone and emergency calls are always reachable.
         </p>
-        <div className="mt-3 flex items-center justify-center gap-1.5 text-[10px] uppercase tracking-[0.2em] opacity-40">
+        <div className="mt-3 flex items-center justify-center gap-1.5 text-overline opacity-60">
           <Sparkles className="h-3 w-3" /> Sleep to Rise
         </div>
       </div>
     </div>
   );
 }
-

@@ -36,6 +36,10 @@ public class NightToRisePreferences {
     private static final String K_SLEEP_MSG        = "sleepBlockMessage";
     private static final String K_RISE_MSG         = "riseBlockMessage";
     private static final String K_PENDING_BREAK_TS = "pendingBreakTs"; // NEW
+    private static final String K_BLOCKED_PACKAGES = "blockedPackages";        // CSV  (PHASE 2)
+    private static final String K_BLOCKED_SITES    = "blockedSites";           // CSV  (PHASE 2)
+    private static final String K_BLOCKED_KEYWORDS = "blockedKeywords";        // CSV  (PHASE 2)
+    private static final String K_BLOCKLIST_MODE   = "blocklistMode";          // blocklist|allowlist
 
     private final SharedPreferences sp;
 
@@ -73,6 +77,24 @@ public class NightToRisePreferences {
         }
         e.putString(K_ALLOWED_PACKAGES, aCsv.toString());
 
+        // ---- PHASE 2: blocklist (apps / sites / keywords) + enforcement mode ----
+        e.putString(K_BLOCKLIST_MODE, o.optString("blocklistMode", "blocklist"));
+
+        JSONArray blocked = o.optJSONArray("blockedApps");
+        StringBuilder bCsv = new StringBuilder();
+        if (blocked != null) for (int i = 0; i < blocked.length(); i++) {
+            JSONObject a = blocked.optJSONObject(i);
+            if (a == null) continue;
+            String id = a.optString("id", "");
+            if (id.isEmpty()) continue;
+            if (bCsv.length() > 0) bCsv.append(",");
+            bCsv.append(id);
+        }
+        e.putString(K_BLOCKED_PACKAGES, bCsv.toString());
+
+        e.putString(K_BLOCKED_SITES,    joinStrings(o.optJSONArray("blockedSites")));
+        e.putString(K_BLOCKED_KEYWORDS, joinStrings(o.optJSONArray("blockedKeywords")));
+
         String paused = o.optString("pausedUntil", null);
         if (paused != null && !paused.isEmpty() && !"null".equals(paused)) {
             try { e.putLong(K_PAUSED_UNTIL_MS, java.time.Instant.parse(paused).toEpochMilli()); }
@@ -81,6 +103,18 @@ public class NightToRisePreferences {
             e.remove(K_PAUSED_UNTIL_MS);
         }
         e.apply();
+    }
+
+    private static String joinStrings(JSONArray arr) {
+        StringBuilder sb = new StringBuilder();
+        if (arr == null) return "";
+        for (int i = 0; i < arr.length(); i++) {
+            String v = arr.optString(i, "").trim().toLowerCase();
+            if (v.isEmpty()) continue;
+            if (sb.length() > 0) sb.append(",");
+            sb.append(v);
+        }
+        return sb.toString();
     }
 
     public void saveRiseAlarmMillis(long ms) { sp.edit().putLong(K_RISE_ALARM_MS, ms).apply(); }
@@ -103,6 +137,19 @@ public class NightToRisePreferences {
         return out;
     }
 
+    public String  blocklistMode()    { return sp.getString(K_BLOCKLIST_MODE, "blocklist"); }
+
+    public Set<String> blockedPackages()  { return csvSet(K_BLOCKED_PACKAGES); }
+    public Set<String> blockedSites()     { return csvSet(K_BLOCKED_SITES); }
+    public Set<String> blockedKeywords()  { return csvSet(K_BLOCKED_KEYWORDS); }
+
+    private Set<String> csvSet(String key) {
+        Set<String> out = new HashSet<>();
+        String csv = sp.getString(key, "");
+        for (String s : csv.split(",")) { String t = s.trim(); if (!t.isEmpty()) out.add(t); }
+        return out;
+    }
+
     public Set<String> allowedPackages() {
         Set<String> out = new HashSet<>();
         String csv = sp.getString(K_ALLOWED_PACKAGES, "");
@@ -113,6 +160,17 @@ public class NightToRisePreferences {
     // ==========================================================
     // NEW: pending-break flag (native override -> JS streak sync)
     // ==========================================================
+
+    // ==========================================================
+    // PHASE 2: strict-mode delayed unlock request
+    // ==========================================================
+    private static final String K_STRICT_REQ_TS = "strictUnlockRequestedAt";
+    /** 10 minute cool-down before strict mode allows an emergency unlock. */
+    public static final long STRICT_UNLOCK_DELAY_MS = 10 * 60 * 1000L;
+
+    public long strictUnlockRequestedAt() { return sp.getLong(K_STRICT_REQ_TS, 0L); }
+    public void requestStrictUnlock()     { sp.edit().putLong(K_STRICT_REQ_TS, System.currentTimeMillis()).apply(); }
+    public void clearStrictUnlockRequest(){ sp.edit().remove(K_STRICT_REQ_TS).apply(); }
 
     /** Called by NightToRiseBlockActivity when the user taps "Emergency unlock". */
     public void recordPendingBreak() {

@@ -51,6 +51,15 @@ public class NightToRiseManager {
             return new Decision(Phase.ARMED, false, 0, "");
         }
 
+        // PHASE 2 — enforcement strategy. In "blocklist" mode only the apps the
+        // user explicitly picked are locked; in "allowlist" mode everything that
+        // is not on the allow-list is locked (the stricter option).
+        if ("blocklist".equals(prefs.blocklistMode())
+            && foregroundPackage != null
+            && !prefs.blockedPackages().contains(foregroundPackage)) {
+            return new Decision(Phase.ARMED, false, 0, "");
+        }
+
         // ---- Sleep-start time (today or yesterday, whichever is most recent) ----
         String[] s = prefs.sleepTime().split(":");
         int sh = Integer.parseInt(s[0]), sm = Integer.parseInt(s[1]);

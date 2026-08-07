@@ -114,3 +114,7 @@ export function getIsoWeekKey(d: Date): string {
 
 /** Max "Pause for one night" uses allowed within a single ISO week. */
 export const MAX_PAUSES_PER_WEEK = 1;
+
+/** PHASE 2 — strict mode: emergency unlock only becomes available after this
+ *  cool-down (10 minutes), instead of being hidden entirely. */
+export const STRICT_UNLOCK_DELAY_MS = 10 * 60 * 1000;

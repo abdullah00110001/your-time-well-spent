@@ -99,14 +99,13 @@ export function NightArc({ sleepTime, riseTime, lockBeforeMin, lockAfterMin, pha
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label={primary}>
         <defs>
           <linearGradient id="n2r-arc" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#8FA8CC" stopOpacity="0.55" />
-            <stop offset="45%" stopColor="#4A3B6B" stopOpacity="0.9" />
-            <stop offset="80%" stopColor="#FF9B71" />
-            <stop offset="100%" stopColor="#FFC978" />
+            <stop offset="0%" stopColor="hsl(var(--muted-foreground))" stopOpacity="0.5" />
+            <stop offset="45%" stopColor="hsl(var(--primary))" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="hsl(var(--warning))" />
           </linearGradient>
           <radialGradient id="n2r-dot">
-            <stop offset="0%" stopColor="#F5F1E8" />
-            <stop offset="100%" stopColor="#F5F1E8" stopOpacity="0" />
+            <stop offset="0%" stopColor="hsl(var(--foreground))" />
+            <stop offset="100%" stopColor="hsl(var(--foreground))" stopOpacity="0" />
           </radialGradient>
         </defs>
 
@@ -119,18 +118,18 @@ export function NightArc({ sleepTime, riseTime, lockBeforeMin, lockAfterMin, pha
         />
 
         {/* Moon — start of the night */}
-        <circle cx="24" cy={ARC_Y} r="9" fill="#161B33" stroke="#8FA8CC" strokeWidth="1.5" />
-        <path d="M 27 112 a 5 5 0 1 1 -5 -5 a 4 4 0 0 0 5 5 z" fill="#8FA8CC" />
+        <circle cx="24" cy={ARC_Y} r="9" fill="hsl(var(--card))" stroke="hsl(var(--muted-foreground))" strokeWidth="1.5" />
+        <path d="M 27 112 a 5 5 0 1 1 -5 -5 a 4 4 0 0 0 5 5 z" fill="hsl(var(--muted-foreground))" />
 
         {/* Sun — end of the night */}
-        <circle cx={W - 24} cy={ARC_Y} r="9" fill="#161B33" stroke="#FFC978" strokeWidth="1.5" />
-        <circle cx={W - 24} cy={ARC_Y} r="4" fill="#FFC978" />
+        <circle cx={W - 24} cy={ARC_Y} r="9" fill="hsl(var(--card))" stroke="hsl(var(--warning))" strokeWidth="1.5" />
+        <circle cx={W - 24} cy={ARC_Y} r="4" fill="hsl(var(--warning))" />
 
         {/* Current time marker */}
         {inWindow && (
           <g style={{ transition: 'transform 1.5s ease' }}>
             <circle cx={dot.x} cy={dot.y} r="14" fill="url(#n2r-dot)" opacity="0.45" />
-            <circle cx={dot.x} cy={dot.y} r="4.5" fill={dawn ? '#FFC978' : '#F5F1E8'} />
+            <circle cx={dot.x} cy={dot.y} r="4.5" fill={dawn ? 'hsl(var(--warning))' : 'hsl(var(--foreground))'} />
           </g>
         )}
       </svg>

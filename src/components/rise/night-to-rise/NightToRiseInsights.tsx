@@ -17,9 +17,11 @@ const DAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
 export function NightToRiseInsights({ config, update }: Props) {
   const {
-    streak, longestStreak, protectedNights, brokenNights,
+    rows, streak, longestStreak, protectedNights, brokenNights,
     last7, last30, weekProtected, weekBroken,
   } = useNightToRiseStreak();
+
+  const log = [...rows].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 14);
 
   const weekKey = getIsoWeekKey(new Date());
   const pausesThisWeek = config.pauseHistory.filter((d) => getIsoWeekKey(new Date(d)) === weekKey).length;
@@ -90,6 +92,32 @@ export function NightToRiseInsights({ config, update }: Props) {
             />
           ))}
         </div>
+      </div>
+
+      {/* Night log */}
+      <div>
+        <p className="mb-2 text-xs font-medium text-muted-foreground">Night log</p>
+        {log.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted-foreground">
+            No nights recorded yet. Your first protected night shows up here tomorrow morning.
+          </p>
+        ) : (
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {log.map((r) => (
+              <li key={r.date} className="flex items-center justify-between px-3 py-2">
+                <span className="text-xs text-muted-foreground">
+                  {new Date(r.date).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}
+                </span>
+                <span className={cn(
+                  'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+                  r.broken ? 'bg-destructive/10 text-destructive' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                )}>
+                  {r.broken ? 'Broken' : 'Protected'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       {/* Group integration */}
