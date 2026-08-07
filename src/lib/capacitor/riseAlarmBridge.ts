@@ -312,3 +312,42 @@ export function getNextDayOfWeek(dayOfWeek: number, hours: number, minutes: numb
   result.setDate(now.getDate() + diff);
   return result;
 }
+
+// ============================================================
+// 🔑 UUID NORMALISATION
+// Recurring shots are scheduled as `${uuid}_day{0-6}` and snooze/follow-up
+// shots as `${uuid}-snooze` / `${uuid}-followup`. The ring screen receives
+// whichever suffixed value fired, so every lookup must go through this.
+// ============================================================
+export function baseAlarmUuid(raw: string | undefined | null): string {
+  if (!raw) return '';
+  return String(raw)
+    .replace(/_day[0-6]$/, '')
+    .replace(/-(snooze|followup)$/, '');
+}
+
+/** True when the fired uuid came from a snooze shot. */
+export function isSnoozeUuid(raw: string | undefined | null): boolean {
+  return /-snooze$/.test(String(raw ?? ''));
+}
+
+/**
+ * One-shot exact alarm at an absolute time (used by snooze so the alarm
+ * fires in N minutes instead of on the next occurrence of a weekday).
+ */
+export const scheduleOneShotAlarm = async (
+  uuid: string,
+  at: Date,
+  config: { title: string; body: string; extraLoud?: boolean; soundUri?: string | null },
+): Promise<boolean> => {
+  await ensureNativeAlarmChannel();
+  return scheduleRiseAlarm(
+    uuidToNumericId(uuid),
+    at.getTime(),
+    config.title,
+    config.body,
+    uuid,
+    config.extraLoud ?? false,
+    config.soundUri ?? null,
+  );
+};

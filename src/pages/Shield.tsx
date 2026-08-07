@@ -43,7 +43,8 @@ import {
   requestBatteryPermission
 } from '@/lib/capacitor/permissions';
 
-type StrictnessMode = 'normal' | 'lock' | 'strict';
+import type { StrictnessMode } from '@/components/shield/ShieldModes';
+import { normalizeShieldMode } from '@/components/shield/ShieldModes';
 type SubPage = 'main' | 'block-screen' | 'block-apps' | 'block-sites' | 'block-keywords' | 'floating-timer' | 'pure-shield';
 
 interface DisciplineProfile {
@@ -222,7 +223,7 @@ export default function ShieldPage() {
       if (storedSettings) setSettings(JSON.parse(storedSettings));
 
       const storedMode = localStorage.getItem('shield_strictness_mode');
-      if (storedMode) setStrictnessMode(storedMode as StrictnessMode);
+      if (storedMode) setStrictnessMode(normalizeShieldMode(storedMode));
 
       const storedScreen = localStorage.getItem('shield_block_screen');
       if (storedScreen) setSelectedBlockScreen(storedScreen);

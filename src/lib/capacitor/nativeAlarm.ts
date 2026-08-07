@@ -281,13 +281,20 @@ export function setupAlarmListeners(
   });
 }
 
+let bootRestoreRegistered = false;
+
 export async function restoreAlarmsOnBoot() {
   if (!Capacitor.isNativePlatform()) return;
-  App.addListener('appStateChange', async ({ isActive }) => {
-    if (!isActive) return;
+  // Guard: this used to add a fresh appStateChange listener on every call,
+  // stacking N listeners and re-running the reschedule work N times per resume.
+  if (bootRestoreRegistered) return;
+  bootRestoreRegistered = true;
+
+  const reschedule = async () => {
     const stored = await Preferences.get({ key: ALARM_STORAGE_KEY });
     if (!stored.value) return;
-    const alarms: AlarmConfig[] = JSON.parse(stored.value);
+    let alarms: AlarmConfig[] = [];
+    try { alarms = JSON.parse(stored.value); } catch { return; }
     const now = new Date();
     for (const alarm of alarms) {
       const scheduledAt = new Date(alarm.scheduledAt);
@@ -295,13 +302,21 @@ export async function restoreAlarmsOnBoot() {
         await scheduleAlarm({ ...alarm, scheduledAt });
       }
     }
+  };
+
+  App.addListener('appStateChange', ({ isActive }) => {
+    if (!isActive) return;
+    reschedule().catch((e) => console.error('[nativeAlarm] boot restore failed', e));
   });
+
+  await reschedule().catch((e) => console.error('[nativeAlarm] boot restore failed', e));
 }
 
 export async function rescheduleAllAlarmsAfterBoot(userId?: string): Promise<void> {
   if (userId) console.log('Rescheduling alarms for user', userId);
   await restoreAlarmsOnBoot();
 }
+
 
 function getNextDayOfWeek(dayOfWeek: number, hours: number, minutes: number): Date {
   const now = new Date();

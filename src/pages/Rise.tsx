@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { readLocalAlarms, writeLocalAlarms } from '@/lib/rise/localAlarms';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Plus, Sunrise } from 'lucide-react';
@@ -106,26 +107,31 @@ export default function RisePage() {
   }, []);
 
   useEffect(() => {
-    if (user) {
-      loadRiseData();
+    if (!user) return;
+    loadRiseData();
+    if (!isNative) return;
 
-      if (isNative) {
-        initializeAlarmChannel(); // Initialize channel silently
-        verifyPermissions();
+    initializeAlarmChannel(); // Initialize channel silently
+    verifyPermissions();
 
-        // � Auto-verify when returning from settings
-        const listener = App.addListener('appStateChange', ({ isActive }) => {
-          if (isActive) {
-            verifyPermissions();
-          }
-        });
+    // Auto-verify when returning from settings.
+    // `cancelled` guard: without it a fast unmount/remount (StrictMode double
+    // invoke) could remove a newer listener or leak the old one.
+    let cancelled = false;
+    let handle: { remove: () => void } | null = null;
+    App.addListener('appStateChange', ({ isActive }) => {
+      if (isActive) verifyPermissions();
+    }).then((l) => {
+      if (cancelled) { l.remove(); return; }
+      handle = l;
+    });
 
-        return () => {
-          listener.then(l => l.remove());
-        };
-      }
-    }
+    return () => {
+      cancelled = true;
+      handle?.remove();
+    };
   }, [user]);
+
 
   // � Function to verify all permissions
   const verifyPermissions = async () => {
@@ -142,67 +148,50 @@ export default function RisePage() {
     }
   };
 
+  // Keep the "next alarm" label fresh without tearing the interval down on
+  // every alarm mutation: the interval is created once and reads the latest
+  // callback through a ref.
+  const updateNextAlarmRef = useRef<() => void>(() => {});
   useEffect(() => {
+    updateNextAlarmRef.current = updateNextAlarm;
     updateNextAlarm();
-    const interval = setInterval(updateNextAlarm, 60000);
+  });
+  useEffect(() => {
+    const interval = setInterval(() => updateNextAlarmRef.current(), 60000);
     return () => clearInterval(interval);
-  }, [alarms]);
+  }, []);
 
-  // Route to full-screen Ring when an alarm notification is received or tapped.
-/*   useEffect(() => {
-    if (!isNative) return;
-    let receivedSub: any, actionSub: any;
-    (async () => {
-      receivedSub = await LocalNotifications.addListener('localNotificationReceived', (n) => {
-        const id = (n.extra as any)?.alarmDbId || (n.extra as any)?.uuid;
-        if (id) navigate(`/rise/ring/${id}`);
-      });
-      actionSub = await LocalNotifications.addListener('localNotificationActionPerformed', (r) => {
-        const id = (r.notification.extra as any)?.alarmDbId || (r.notification.extra as any)?.uuid;
-        if (id) navigate(`/rise/ring/${id}`);
-      });
-    })();
-    return () => {
-      receivedSub?.remove?.();
-      actionSub?.remove?.();
-    };
-  }, [navigate]);
- */
   const loadLocalAlarms = (): RiseAlarm[] => {
-    try {
-      const raw = localStorage.getItem('local_alarms');
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      return (parsed as any[]).map((a) => ({
-        id: a.id,
-        alarm_time: a.alarm_time,
-        days_of_week: a.days_of_week || [],
-        alarm_type: a.alarm_type || 'personal',
-        is_enabled: a.is_enabled !== false,
-        intention: a.intention || null,
-        label: a.label || null,
-        verification_type: a.verification_type || 'math',
-        snooze_limit: a.snooze_limit ?? 3,
-        snooze_interval_minutes: a.snooze_interval_minutes ?? 5,
-        sound_type: a.sound_type || 'default',
-        vibration_enabled: a.vibration_enabled ?? true,
-        // ✅ Persist user-selected ringtone across sessions
-        ringtone_url: a.ringtone_url ?? null,
-        ringtone_name: a.ringtone_name ?? null,
-      }));
-    } catch (e) {
-      console.warn('Failed to read local alarms', e);
-      return [];
-    }
+    return readLocalAlarms().map((a: any) => ({
+      // Spread first so alarm-specific extras (mission_config, extra_loud,
+      // wallpaper_url, groupId…) survive a round-trip through this screen.
+      ...a,
+      id: a.id,
+      alarm_time: a.alarm_time,
+      days_of_week: a.days_of_week || [],
+      alarm_type: a.alarm_type || 'personal',
+      is_enabled: a.is_enabled !== false,
+      intention: a.intention || null,
+      label: a.label || null,
+      verification_type: a.verification_type || 'math',
+      snooze_limit: a.snooze_limit ?? 3,
+      snooze_interval_minutes: a.snooze_interval_minutes ?? 5,
+      sound_type: a.sound_type || 'default',
+      vibration_enabled: a.vibration_enabled ?? true,
+      // ✅ Persist user-selected ringtone across sessions
+      ringtone_url: a.ringtone_url ?? null,
+      ringtone_name: a.ringtone_name ?? null,
+    })) as RiseAlarm[];
   };
 
   const saveLocalAlarms = (list: RiseAlarm[]) => {
-    try {
-      localStorage.setItem('local_alarms', JSON.stringify(list));
-    } catch (e) {
-      console.warn('Failed to persist local alarms', e);
-    }
+    // Merge over the stored records so fields this screen doesn't model are
+    // never dropped.
+    const stored = readLocalAlarms();
+    const byId = new Map<string, any>(stored.map((a: any) => [String(a?.id), a] as [string, any]));
+    writeLocalAlarms(list.map((a: any) => ({ ...(byId.get(String(a.id)) || {}), ...a })));
   };
+
 
   const loadRiseData = async () => {
     if (!user) return;
