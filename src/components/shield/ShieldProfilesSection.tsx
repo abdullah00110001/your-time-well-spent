@@ -46,6 +46,8 @@ interface ShieldProfilesSectionProps {
 export function ShieldProfilesSection({ profiles, onActivate, activeSession, onRefresh }: ShieldProfilesSectionProps) {
   const { user } = useAuth();
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [newProfile, setNewProfile] = useState({
     name: '',
     icon: '🎯',
@@ -56,31 +58,62 @@ export function ShieldProfilesSection({ profiles, onActivate, activeSession, onR
 
   const emojiOptions = ['🎯', '📚', '💼', '🧘', '😴', '💪', '🔥', '⚡', '🚀', '🎮', '📵', '🧠'];
 
-  const createProfile = async () => {
-    if (!user || !newProfile.name) return;
+  const resetForm = () => {
+    setEditingId(null);
+    setNewProfile({ name: '', icon: '🎯', description: '', strictness_level: 'normal', default_duration_minutes: 60 });
+  };
 
-    const { error } = await supabase
-      .from('discipline_profiles')
-      .insert({
-        user_id: user.id,
-        ...newProfile,
-        blocked_apps: [],
-        blocked_websites: [],
-        blocked_keywords: [],
-        block_infinite_content: true,
-        block_adult_content: true
-      });
+  const openEditDialog = (profile: DisciplineProfile) => {
+    setEditingId(profile.id);
+    setNewProfile({
+      name: profile.name,
+      icon: profile.icon || '🎯',
+      description: profile.description || '',
+      strictness_level: profile.strictness_level || 'normal',
+      default_duration_minutes: profile.default_duration_minutes || 60,
+    });
+    setShowCreateDialog(true);
+  };
+
+  const saveProfile = async () => {
+    if (!user || !newProfile.name.trim()) {
+      toast.error('Profile name is required');
+      return;
+    }
+    setSaving(true);
+
+    const { error } = editingId
+      ? await supabase
+          .from('discipline_profiles')
+          .update({ ...newProfile, name: newProfile.name.trim() })
+          .eq('id', editingId)
+          .eq('user_id', user.id)
+      : await supabase
+          .from('discipline_profiles')
+          .insert({
+            user_id: user.id,
+            ...newProfile,
+            name: newProfile.name.trim(),
+            blocked_apps: [],
+            blocked_websites: [],
+            blocked_keywords: [],
+            block_infinite_content: true,
+            block_adult_content: true
+          });
+
+    setSaving(false);
 
     if (error) {
-      toast.error('Failed to create profile');
+      toast.error(editingId ? 'Failed to update profile' : 'Failed to create profile');
       return;
     }
 
-    toast.success('Profile created!');
+    toast.success(editingId ? 'Profile updated' : 'Profile created!');
     setShowCreateDialog(false);
-    setNewProfile({ name: '', icon: '🎯', description: '', strictness_level: 'normal', default_duration_minutes: 60 });
+    resetForm();
     onRefresh();
   };
+
 
   const deleteProfile = async (profileId: string) => {
     const { error } = await supabase.from('discipline_profiles').delete().eq('id', profileId);
