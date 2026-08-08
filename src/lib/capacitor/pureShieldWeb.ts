@@ -125,5 +125,4 @@ export class PureShieldWeb extends WebPlugin implements PureShieldPluginInterfac
 
   async switchModelTier(_data: { tier: string }) { /* no-op */ }
 
-  // aliases
 }
