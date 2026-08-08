@@ -126,9 +126,4 @@ export class PureShieldWeb extends WebPlugin implements PureShieldPluginInterfac
   async switchModelTier(_data: { tier: string }) { /* no-op */ }
 
   // aliases
-  async startService() { return this.startPureShield(); }
-  async stopService() { return this.stopPureShield(); }
-  async isEnabled() { return this.isRunning(); }
-  async saveConfig(config: Partial<PureShieldConfig>) { return this.setConfig(config); }
-  async loadConfig() { return this.getConfig(); }
 }
