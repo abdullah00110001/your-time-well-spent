@@ -166,7 +166,10 @@ export default function AdminSafetyEthics() {
                   <Slider value={ethicalLimits[s.key]} onValueChange={v => setEthicalLimits(p => ({ ...p, [s.key]: v }))} max={s.max} step={1} />
                 </div>
               ))}
-              <Button onClick={saveSettings} className="w-full">Save Ethical Limits</Button>
+              <Button onClick={saveSettings} disabled={saving} className="w-full">
+                {saving ? 'Saving…' : 'Save Ethical Limits'}
+              </Button>
+
             </CardContent>
           </Card>
         </TabsContent>
