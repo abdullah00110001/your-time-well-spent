@@ -36,13 +36,29 @@ public class PureShieldAdaptiveEngine {
     // LOW device:  ~1 FPS max  — no lag on weak SoCs
     // MID device:  ~2 FPS      — comfortable mid range
     // HIGH device: ~3-4 FPS    — fast enough for scrolling feeds
-    private static final long INTERVAL_FAST   = 350;   // HIGH tier, app just opened
-    private static final long INTERVAL_NORMAL = 550;   // HIGH tier baseline
+    private static final long INTERVAL_FAST   = 100;   // HIGH tier, app just opened
+    private static final long INTERVAL_NORMAL = 120;   // HIGH tier baseline (<=120ms when thermals allow)
     private static final long INTERVAL_MID    = 800;   // MID tier baseline
     private static final long INTERVAL_SLOW   = 1400;  // LOW tier baseline
     private static final long INTERVAL_IDLE   = 2500;  // thermal/battery throttle
 
     private volatile long currentIntervalMs;
+
+    /** Notified whenever currentIntervalMs changes so the sampler can be rescheduled. */
+    public interface OnIntervalChangeListener { void onIntervalChanged(long newIntervalMs); }
+    private volatile OnIntervalChangeListener intervalChangeListener;
+
+    public void setOnIntervalChangeListener(OnIntervalChangeListener listener) {
+        this.intervalChangeListener = listener;
+    }
+
+    private void setInterval(long newValue) {
+        if (currentIntervalMs != newValue) {
+            currentIntervalMs = newValue;
+            OnIntervalChangeListener l = intervalChangeListener;
+            if (l != null) { try { l.onIntervalChanged(newValue); } catch (Throwable ignored) {} }
+        }
+    }
 
     // ── Context ───────────────────────────────────────────────────────────────
     private final Context context;
@@ -180,20 +196,20 @@ public class PureShieldAdaptiveEngine {
         switch (status) {
             case PowerManager.THERMAL_STATUS_NONE:
             case PowerManager.THERMAL_STATUS_LIGHT:
-                currentIntervalMs = getBaseInterval();
+                setInterval(getBaseInterval());
                 Log.d(TAG, "Thermal OK — restored base interval");
                 break;
             case PowerManager.THERMAL_STATUS_MODERATE:
                 // Slow down but don't stop
-                currentIntervalMs = deviceTier == DeviceTier.LOW
-                    ? INTERVAL_IDLE : INTERVAL_SLOW;
+                setInterval(deviceTier == DeviceTier.LOW
+                    ? INTERVAL_IDLE : INTERVAL_SLOW);
                 Log.w(TAG, "Thermal MODERATE — throttled to " + currentIntervalMs + "ms");
                 break;
             case PowerManager.THERMAL_STATUS_SEVERE:
             case PowerManager.THERMAL_STATUS_CRITICAL:
             case PowerManager.THERMAL_STATUS_EMERGENCY:
             case PowerManager.THERMAL_STATUS_SHUTDOWN:
-                currentIntervalMs = INTERVAL_IDLE;
+                setInterval(INTERVAL_IDLE);
                 Log.w(TAG, "Thermal SEVERE — idle mode");
                 break;
         }
@@ -208,15 +224,15 @@ public class PureShieldAdaptiveEngine {
         if (temp <= 0) return; // unreadable
 
         if (temp >= CPU_TEMP_EMERGENCY) {
-            currentIntervalMs = INTERVAL_IDLE;
+            setInterval(INTERVAL_IDLE);
             Log.w(TAG, "CPU temp " + temp + "°C — emergency idle");
         } else if (temp >= CPU_TEMP_THROTTLE) {
-            currentIntervalMs = Math.max(getBaseInterval(), INTERVAL_SLOW);
+            setInterval(Math.max(getBaseInterval(), INTERVAL_SLOW));
             Log.w(TAG, "CPU temp " + temp + "°C — throttled");
         } else {
             // Cool enough — restore base interval if we had throttled
             if (currentIntervalMs > getBaseInterval()) {
-                currentIntervalMs = getBaseInterval();
+                setInterval(getBaseInterval());
                 Log.d(TAG, "CPU temp " + temp + "°C — restored");
             }
         }
@@ -252,7 +268,7 @@ public class PureShieldAdaptiveEngine {
 
         // 2. Low battery on LOW device → idle mode
         if (cachedBatteryLevel < 15 && !cachedCharging && deviceTier == DeviceTier.LOW) {
-            currentIntervalMs = INTERVAL_IDLE;
+            setInterval(INTERVAL_IDLE);
         }
 
         // 3. Thermal critical (Android 10+)
@@ -267,7 +283,7 @@ public class PureShieldAdaptiveEngine {
             int slow = consecutiveSlowFrames.incrementAndGet();
             if (slow >= 3) {
                 // Back off exponentially, capped at INTERVAL_IDLE
-                currentIntervalMs = Math.min(currentIntervalMs * 2, INTERVAL_IDLE);
+                setInterval(Math.min(currentIntervalMs * 2, INTERVAL_IDLE));
                 consecutiveSlowFrames.set(0);
                 Log.w(TAG, "Slow inference (" + lastMs + "ms) — backed off to " + currentIntervalMs + "ms");
             }
@@ -278,7 +294,7 @@ public class PureShieldAdaptiveEngine {
         if (lastMs > 0 && lastMs < currentIntervalMs * 0.4f) {
             consecutiveSlowFrames.set(0);
             if (currentIntervalMs > getBaseInterval()) {
-                currentIntervalMs = Math.max(getBaseInterval(), currentIntervalMs - 100);
+                setInterval(Math.max(getBaseInterval(), currentIntervalMs - 100));
             }
         }
 
@@ -359,7 +375,7 @@ public class PureShieldAdaptiveEngine {
      */
     public void onTargetAppResumed() {
         if (deviceTier == DeviceTier.LOW) return; // LOW devices: no boost
-        currentIntervalMs = INTERVAL_FAST;
+        setInterval(INTERVAL_FAST);
         consecutiveSlowFrames.set(0);
 
         // Cancel previous fallback if any
@@ -370,7 +386,7 @@ public class PureShieldAdaptiveEngine {
         fastModeFallback = scheduler.schedule(
             () -> {
                 if (currentIntervalMs == INTERVAL_FAST) {
-                    currentIntervalMs = getBaseInterval();
+                    setInterval(getBaseInterval());
                     Log.d(TAG, "Fast-mode expired — restored to " + currentIntervalMs + "ms");
                 }
             },
@@ -380,7 +396,7 @@ public class PureShieldAdaptiveEngine {
 
     public void onConfigChanged(PureShieldConfig newConfig) {
         this.config = newConfig;
-        currentIntervalMs = getBaseInterval();
+        setInterval(getBaseInterval());
     }
 
     // ─────────────────────────────────────────────────────────────────────────

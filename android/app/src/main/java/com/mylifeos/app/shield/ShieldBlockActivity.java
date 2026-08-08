@@ -23,11 +23,82 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import com.mylifeos.app.shield.core.BlockLoopGuard;
+
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 public class ShieldBlockActivity extends Activity {
+
+    private static final String TAG = "ShieldBlockActivity";
+
+    /** Max times this activity may be (re)launched inside the rolling window before it's a loop. */
+    private static final int MAX_LAUNCHES_IN_WINDOW = 3;
+
+    /** Rolling window used to detect relaunch loops. */
+    private static final long LAUNCH_WINDOW_MS = 20_000;
+
+    /** Number of synthetic triggers registered against BlockLoopGuard to force it into its
+     *  built-in global backoff state (it enters backoff once its internal cap, currently 6,
+     *  is exceeded inside its own 15s window). Using a margin above that keeps this resilient
+     *  to internal tuning without needing BlockLoopGuard to expose new API. */
+    private static final int LOOP_GUARD_DISARM_TRIGGER_COUNT = 8;
+
+    /** Process-wide record of recent launch timestamps for THIS activity — used purely for the
+     *  hard loop-breaker below (independent of, but complementary to, BlockLoopGuard). */
+    private static final Deque<Long> recentLaunchTimestamps = new ArrayDeque<>();
+
+    /** Shared BlockLoopGuard instance so state (cooldowns/backoff) persists across re-launches
+     *  of this activity instead of being reset every time a fresh instance is created. */
+    private static volatile BlockLoopGuard sSharedLoopGuard;
+
+    /** Guards against more than one live instance of this activity stacking on top of itself. */
+    private static volatile boolean sInstanceActive = false;
+
+    private boolean finishHandled = false;
+    private String blockedPackage;
+
+    private static synchronized BlockLoopGuard getSharedLoopGuard(Context context) {
+        if (sSharedLoopGuard == null) {
+            sSharedLoopGuard = new BlockLoopGuard(context.getApplicationContext());
+        }
+        return sSharedLoopGuard;
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        blockedPackage = getIntent().getStringExtra("BLOCKED_PACKAGE");
+        boolean isAdultBlock = getIntent().getBooleanExtra("IS_ADULT_BLOCK", false);
+
+        // ============================================================
+        // 🛑 Double-launch guard: if another instance of this activity
+        // is already showing, don't stack a second one on top.
+        // ============================================================
+        if (sInstanceActive) {
+            Log.w(TAG, "ShieldBlockActivity already active — ignoring duplicate launch for pkg=" + blockedPackage);
+            safeFinish();
+            return;
+        }
+
+        // ============================================================
+        // 🛑 HARD LOOP-BREAKER
+        // If this activity has been launched too many times in a short
+        // rolling window (e.g. forceUserToHome() -> onUserLeaveHint() ->
+        // accessibility service re-triggers it), stop showing the block
+        // screen and disarm blocking for a cooldown period instead.
+        // ============================================================
+        if (isRelaunchLoop()) {
+            Log.w(TAG, "Loop-breaker tripped: ShieldBlockActivity relaunched " + MAX_LAUNCHES_IN_WINDOW
+                + "+ times within " + LAUNCH_WINDOW_MS + "ms (pkg=" + blockedPackage
+                + "). Skipping block screen and disarming blocking via BlockLoopGuard cooldown.");
+            disarmLoopGuardCooldown(blockedPackage);
+            safeFinish();
+            return;
+        }
+
+        sInstanceActive = true;
 
         // Vibration
         try {
@@ -46,8 +117,7 @@ public class ShieldBlockActivity extends Activity {
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
         w.setStatusBarColor(Color.TRANSPARENT);
 
-        String pkgName = getIntent().getStringExtra("BLOCKED_PACKAGE");
-        boolean isAdultBlock = getIntent().getBooleanExtra("IS_ADULT_BLOCK", false);
+        String pkgName = blockedPackage;
         if (pkgName == null) pkgName = "this app";
         String appName = extractAppName(pkgName);
 
@@ -63,6 +133,41 @@ public class ShieldBlockActivity extends Activity {
     }
 
     // ==========================================
+    // 🔁 Loop detection / disarm helpers
+    // ==========================================
+
+    private static synchronized boolean isRelaunchLoop() {
+        long now = System.currentTimeMillis();
+        while (!recentLaunchTimestamps.isEmpty()
+            && now - recentLaunchTimestamps.peekFirst() > LAUNCH_WINDOW_MS) {
+            recentLaunchTimestamps.pollFirst();
+        }
+        recentLaunchTimestamps.addLast(now);
+        return recentLaunchTimestamps.size() > MAX_LAUNCHES_IN_WINDOW;
+    }
+
+    /**
+     * Uses BlockLoopGuard's own public API (rather than any new/duplicated cooldown logic) to
+     * push it into its built-in global backoff state, effectively disarming further block
+     * actions for its BACKOFF_COOLDOWN_MS window.
+     */
+    private void disarmLoopGuardCooldown(String packageName) {
+        try {
+            BlockLoopGuard guard = getSharedLoopGuard(this);
+            String pkg = packageName != null ? packageName : "unknown";
+            for (int i = 0; i < LOOP_GUARD_DISARM_TRIGGER_COUNT; i++) {
+                guard.registerTrigger(pkg);
+            }
+            // Evaluating any of the should*Block methods after exceeding the internal cap causes
+            // BlockLoopGuard to enter its own backoff state as a side effect.
+            guard.shouldForceHardBlock(pkg);
+            Log.w(TAG, "BlockLoopGuard disarmed for cooldown after relaunch-loop detection (pkg=" + pkg + ")");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to disarm BlockLoopGuard after loop detection", e);
+        }
+    }
+
+    // ==========================================
     // 🔞 Adult Block Screen
     // ShieldPreferences থেকে selected style পড়ে
     // ==========================================
@@ -71,6 +176,7 @@ public class ShieldBlockActivity extends Activity {
         ShieldPreferences shieldPrefs = new ShieldPreferences(this);
         String style = shieldPrefs.getAdultBlockScreenStyle();
         String customMessage = shieldPrefs.getAdultBlockCustomMessage();
+        boolean strictMode = shieldPrefs.isStrictMode();
 
         LinearLayout mainLayout = new LinearLayout(this);
         mainLayout.setOrientation(LinearLayout.VERTICAL);
@@ -118,6 +224,12 @@ public class ShieldBlockActivity extends Activity {
         card.addView(title);
         card.addView(message);
         card.addView(btn);
+
+        if (!strictMode) {
+            Button mistakeBtn = buildMistakeButton();
+            card.addView(mistakeBtn);
+        }
+
         mainLayout.addView(card);
         setContentView(mainLayout);
     }
@@ -130,6 +242,8 @@ public class ShieldBlockActivity extends Activity {
         String customQuote = prefs.getString("shield_block_screen_text",
             "Stay Focused on your GOALS,\nyour PEACE & your HAPPINESS...");
         String base64Image = prefs.getString("shield_block_screen_image", null);
+
+        boolean strictMode = new ShieldPreferences(this).isStrictMode();
 
         LinearLayout mainLayout = new LinearLayout(this);
         mainLayout.setOrientation(LinearLayout.VERTICAL);
@@ -181,8 +295,49 @@ public class ShieldBlockActivity extends Activity {
         card.addView(quoteText);
         card.addView(blockedText);
         card.addView(btn);
+
+        if (!strictMode) {
+            Button mistakeBtn = buildMistakeButton();
+            card.addView(mistakeBtn);
+        }
+
         mainLayout.addView(card);
         setContentView(mainLayout);
+    }
+
+    // ==========================================
+    // 🙈 Accidental-trigger dismiss action
+    // Non-punitive: doesn't count as an offense/escalation, just gets
+    // the user home and clears BlockLoopGuard's escalation state for
+    // this package so it's not immediately re-blocked.
+    // ==========================================
+    private Button buildMistakeButton() {
+        Button mistakeBtn = new Button(this);
+        mistakeBtn.setText("I opened this by mistake");
+        mistakeBtn.setAllCaps(false);
+        mistakeBtn.setTextSize(13);
+        mistakeBtn.setTextColor(Color.parseColor("#CCFFFFFF"));
+        mistakeBtn.setPadding(40, 24, 40, 24);
+        GradientDrawable btnBg = new GradientDrawable();
+        btnBg.setColor(Color.TRANSPARENT);
+        btnBg.setStroke(0, Color.TRANSPARENT);
+        mistakeBtn.setBackground(btnBg);
+        mistakeBtn.setOnClickListener(v -> dismissAsAccidentalTrigger());
+        return mistakeBtn;
+    }
+
+    private void dismissAsAccidentalTrigger() {
+        try {
+            if (blockedPackage != null) {
+                // Clear escalation state so the user gets a short grace period before this
+                // package can trip a hard block again — no offense/trigger is registered.
+                getSharedLoopGuard(this).reset(blockedPackage);
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to register grace period with BlockLoopGuard", e);
+        }
+        Log.d(TAG, "User dismissed block screen as accidental trigger (pkg=" + blockedPackage + ")");
+        forceUserToHome();
     }
 
     // ==========================================
@@ -314,11 +469,27 @@ public class ShieldBlockActivity extends Activity {
     }
 
     private void forceUserToHome() {
-        Intent startMain = new Intent(Intent.ACTION_MAIN);
-        startMain.addCategory(Intent.CATEGORY_HOME);
-        startMain.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-        startActivity(startMain);
-        finish();
+        try {
+            Intent startMain = new Intent(Intent.ACTION_MAIN);
+            startMain.addCategory(Intent.CATEGORY_HOME);
+            startMain.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(startMain);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to launch home screen", e);
+        }
+        safeFinish();
+    }
+
+    /**
+     * Idempotent finish — forceUserToHome(), onUserLeaveHint() and onBackPressed() can all race
+     * to finish this activity; make sure we only ever act on the first one.
+     */
+    private void safeFinish() {
+        if (finishHandled) return;
+        finishHandled = true;
+        if (!isFinishing()) {
+            finish();
+        }
     }
 
     @Override
@@ -329,6 +500,12 @@ public class ShieldBlockActivity extends Activity {
     @Override
     protected void onUserLeaveHint() {
         super.onUserLeaveHint();
-        finish();
+        safeFinish();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        sInstanceActive = false;
     }
 }

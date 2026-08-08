@@ -163,11 +163,10 @@
         <!-- ================================================
         🛡️ SHIELD SERVICES
         ================================================ -->
-        <service
-            android:name=".shield.ShieldService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+        <!-- .shield.ShieldService removed: it was a never-started foreground service
+             that never called startForeground(). Blocking is owned by
+             ShieldAccessibilityService + ShieldVpnService. -->
+
         <service
             android:name=".shield.ShieldFloatingService"
             android:enabled="true"
@@ -186,13 +185,17 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
         <service
-    android:name=".shield.ShieldVpnService"
-    android:permission="android.permission.BIND_VPN_SERVICE"
-    android:exported="false">
-    <intent-filter>
-        <action android:name="android.net.VpnService" />
-    </intent-filter>
-</service>
+            android:name=".shield.ShieldVpnService"
+            android:permission="android.permission.BIND_VPN_SERVICE"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn_content_filtering" />
+            <intent-filter>
+                <action android:name="android.net.VpnService" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".shield.vision.PureShieldService"

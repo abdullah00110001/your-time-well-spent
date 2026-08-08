@@ -45,7 +45,7 @@ public class PureShieldConfig {
 
     public void setBlurGender(BlurGender g)                    { this.blurGender = g; }
     public void setBlurStyle(PureShieldBlurView.BlurStyle s)   { this.blurStyle = s; }
-    public void setConfidenceThreshold(float t)                { this.confidenceThreshold = t; }
+    public void setConfidenceThreshold(float t)                { this.confidenceThreshold = Math.max(0.05f, Math.min(0.95f, t)); }
     public void setBlurOpacity(int o)                          { this.blurOpacity = Math.max(20, Math.min(100, o)); }
     public void setBlurPaddingPct(int p)                       { this.blurPaddingPct = Math.max(0, Math.min(80, p)); }
     public void setMinFaceSizePct(int p)                       { this.minFaceSizePct = Math.max(1, Math.min(30, p)); }

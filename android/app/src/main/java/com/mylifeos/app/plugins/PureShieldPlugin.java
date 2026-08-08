@@ -285,6 +285,7 @@ public class PureShieldPlugin extends Plugin {
         result.put("blazeKeptCount",   PureShieldService.lastBlazeKeptCount);
         result.put("overlayCount",     PureShieldService.lastOverlayCount);
         result.put("genderModelLoaded", PureShieldService.lastGenderModelLoaded);
+        result.put("projectionRevoked", PureShieldService.projectionRevoked);
         call.resolve(result);
     }
 

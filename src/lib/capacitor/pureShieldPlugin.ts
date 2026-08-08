@@ -8,16 +8,16 @@ export type BlurGender = 'FEMALE' | 'MALE' | 'BOTH';
 export type BlurStyle  = 'BLUR' | 'PIXELATE' | 'SMUDGE' | 'DOTS' | 'FROSTED' | 'MOSAIC' | 'SOLID';
 
 export interface PureShieldConfig {
-  blurGender:           BlurGender;
-  blurStyle:            BlurStyle;
-  confidenceThreshold:  number; // 0.0 – 1.0, default 0.72
-  blurOpacity?:         number;
-  blurPaddingPct?:      number;
-  minFaceSizePct?:      number;
-  maxFaces?:            number;
-  debugOverlay?:        boolean;
-  enabled:              boolean;
-  pauseOnBatteryBelow20: boolean;
+  blurGender:             BlurGender;
+  blurStyle:              BlurStyle;
+  confidenceThreshold:    number; // 0.0 – 1.0, default 0.72
+  blurOpacity:            number; // 0–100, blur transparency
+  blurPaddingPct:         number; // extra padding % around a face
+  minFaceSizePct:         number; // minimum face size % of screen
+  maxFaces:               number; // max faces to blur simultaneously
+  debugOverlay:           boolean; // green bounding box debug mode
+  enabled:                boolean;
+  pauseOnBatteryBelow20:  boolean;
 }
 
 export interface InstalledApp {
@@ -31,11 +31,11 @@ export interface PermissionStatus {
 }
 
 export interface AdaptiveStatus {
-  deviceTier:      string;
+  deviceTier:       string;
   sampleIntervalMs: number;
-  batteryLevel:    number;
-  thermalStatus:   number;
-  lastInferenceMs: number;
+  batteryLevel:     number;
+  thermalStatus:    number | string;
+  lastInferenceMs:  number;
 }
 
 export type ModelStatusCode = 'OK' | 'MODEL_FAILED' | 'MODEL_EMPTY' | 'UNKNOWN';
@@ -46,18 +46,29 @@ export interface ModelStatus {
 }
 
 export interface LiveStats {
-  totalFrames: number;
-  totalFaces: number;
-  totalBlurred: number;
-  lastInferenceMs: number;
-  lastDebugMessage: string;
-  modelStatus: string;
-  foregroundApp?: string;
-  blazeMaxScore?: number;
-  blazeAboveCount?: number;
-  blazeKeptCount?: number;
-  overlayCount?: number;
+  totalFrames:        number;
+  totalFaces:         number;
+  totalBlurred:       number;
+  lastInferenceMs:    number;
+  lastDebugMessage:   string;
+  modelStatus:        string;
+  foregroundApp?:     string;
+  blazeMaxScore?:     number;
+  blazeAboveCount?:   number;
+  blazeKeptCount?:    number;
+  overlayCount?:      number;
   genderModelLoaded?: boolean;
+  projectionRevoked?: boolean;
+}
+
+export interface DeviceInfo {
+  autoDetectedTier: string;
+  selectedTier:     string;
+  deviceInfo:       string;
+  expectedFps:      number;
+  batteryDrain:     number;
+  tierName:         string;
+  tierDescription:  string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,8 +80,8 @@ export interface PureShieldPluginInterface {
   requestOverlayPermission():    Promise<{ granted: boolean }>;
   requestMediaProjection():      Promise<{ granted: boolean }>;
 
-  startPureShield():             Promise<{ started: boolean }>;
-  stopPureShield():              Promise<void>;
+  startPureShield():             Promise<{ started: boolean; requiresProjection?: boolean }>;
+  stopPureShield():               Promise<void>;
   isRunning():                   Promise<{ running: boolean }>;
 
   setConfig(config: Partial<PureShieldConfig>): Promise<void>;
@@ -83,6 +94,15 @@ export interface PureShieldPluginInterface {
   getAdaptiveStatus():           Promise<AdaptiveStatus>;
   getModelStatus():              Promise<ModelStatus>;
   getLiveStats():                Promise<LiveStats>;
+  getDeviceInfo():                Promise<DeviceInfo>;
+  switchModelTier(data: { tier: string }): Promise<void>;
+
+  // aliases (also exist natively in PureShieldPlugin.java)
+  startService():                Promise<{ started: boolean; requiresProjection?: boolean }>;
+  stopService():                 Promise<void>;
+  isEnabled():                   Promise<{ running: boolean }>;
+  saveConfig(config: Partial<PureShieldConfig>): Promise<void>;
+  loadConfig():                  Promise<PureShieldConfig>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

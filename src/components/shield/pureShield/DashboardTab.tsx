@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import { MasterToggle } from './MasterToggle';
 import type { PureShieldMetrics } from './types';
-import type { LiveStats } from '@/hooks/pureShieldPlugin';
+import type { LiveStats } from '@/lib/capacitor/pureShieldPlugin';
 
 interface DashboardTabProps {
   running: boolean;

@@ -12,12 +12,14 @@ public class ShieldAppFirewall {
 
     private static final String TAG = "ShieldAppFirewall";
 
-    public static final String ACTION_BLOCK_APP   = "shield.firewall.BLOCK_APP";
-    public static final String ACTION_UNBLOCK_APP = "shield.firewall.UNBLOCK_APP";
-    public static final String ACTION_BLOCK_ALL   = "shield.firewall.BLOCK_ALL";
-    public static final String ACTION_UNBLOCK_ALL = "shield.firewall.UNBLOCK_ALL";
-    public static final String EXTRA_PACKAGE      = "target_package";
-    public static final String EXTRA_DURATION_MS  = "duration_ms";
+    // Single source of truth: these mirror ShieldVpnService so a rename there is a
+    // compile error here instead of a silent runtime mismatch.
+    public static final String ACTION_BLOCK_APP   = ShieldVpnService.ACTION_BLOCK_APP;
+    public static final String ACTION_UNBLOCK_APP = ShieldVpnService.ACTION_UNBLOCK_APP;
+    public static final String ACTION_BLOCK_ALL   = ShieldVpnService.ACTION_BLOCK_ALL;
+    public static final String ACTION_UNBLOCK_ALL = ShieldVpnService.ACTION_UNBLOCK_ALL;
+    public static final String EXTRA_PACKAGE      = ShieldVpnService.EXTRA_PACKAGE;
+    public static final String EXTRA_DURATION_MS  = ShieldVpnService.EXTRA_DURATION_MS;
 
     private final Context context;
 

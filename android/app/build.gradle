@@ -42,6 +42,13 @@ android {
     }
 
 
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            returnDefaultValues = false
+        }
+    }
+
     buildTypes {
         release {
             signingConfig signingConfigs.release
@@ -87,6 +94,11 @@ dependencies {
     // ML Kit (free, no API key required)
     implementation 'com.google.mlkit:barcode-scanning:17.3.0'
     implementation 'com.google.mlkit:face-detection:16.1.7'
+
+    // Local JVM unit tests (ContentMatcher normalization / word-boundary rules).
+    // Robolectric is required because ContentMatcher touches android.text.TextUtils.
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.11.1'
 }
 
 apply from: 'capacitor.build.gradle'

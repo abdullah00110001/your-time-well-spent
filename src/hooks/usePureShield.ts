@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import {
   PureShieldPlugin,
   type PureShieldConfig,
@@ -31,6 +32,8 @@ const DEFAULT_STATS: LiveStats = {
   modelStatus:      'UNKNOWN',
 };
 
+const BACKGROUND_POLL_MS = 3000;
+
 export function usePureShield() {
   const [config,        setConfig]        = useState<PureShieldConfig>(DEFAULT_CONFIG);
   const [permissions,   setPermissions]   = useState<PermissionStatus>({ overlay: false, projection: false });
@@ -42,7 +45,8 @@ export function usePureShield() {
   const [modelStatus,   setModelStatus]    = useState<ModelStatus>({ status: 'UNKNOWN' });
   const [liveStats,     setLiveStats]      = useState<LiveStats>(DEFAULT_STATS);
 
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const statsPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const runningPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ─────────────────────────────────────────────────────
   // Refresh
@@ -70,13 +74,18 @@ export function usePureShield() {
   // Config
   // ─────────────────────────────────────────────────────
   const updateConfig = useCallback(async (patch: Partial<PureShieldConfig>) => {
+    const previous = config;
     setConfig(prev => ({ ...prev, ...patch }));
     try {
       await PureShieldPlugin.setConfig(patch);
+      const fresh = await PureShieldPlugin.getConfig();
+      setConfig({ ...DEFAULT_CONFIG, ...fresh });
     } catch (e) {
       console.warn('setConfig failed', e);
+      setConfig(previous);
+      toast.error('Failed to update PureShield settings');
     }
-  }, []);
+  }, [config]);
 
   // ─────────────────────────────────────────────────────
   // Start / Stop
@@ -116,7 +125,9 @@ export function usePureShield() {
   const requestProjection = useCallback(async () => {
     const r = await PureShieldPlugin.requestMediaProjection();
     if (r.granted) {
-      // Service শুরু হতে সময় লাগে — 3s পর্যন্ত poll করো
+      // The service takes a moment to spin up — poll briefly for a fast UI
+      // update, but the background poll below will keep reconciling `running`
+      // regardless, so a late-starting service is still picked up.
       let runningState = await PureShieldPlugin.isRunning().catch(() => ({ running: false }));
       for (let i = 0; i < 10 && !runningState.running; i++) {
         await new Promise(res => setTimeout(res, 300));
@@ -145,26 +156,53 @@ export function usePureShield() {
   }, []);
 
   const toggleTargetApp = useCallback(async (pkg: string) => {
-    const next = targetApps.includes(pkg)
-      ? targetApps.filter(p => p !== pkg)
-      : [...targetApps, pkg];
+    const previous = targetApps;
+    const next = previous.includes(pkg)
+      ? previous.filter(p => p !== pkg)
+      : [...previous, pkg];
     setTargetApps(next);
     try {
       await PureShieldPlugin.setTargetApps({ packages: next });
+      const fresh = await PureShieldPlugin.getTargetApps();
+      setTargetApps(fresh.packages);
     } catch (e) {
       console.warn('setTargetApps failed', e);
+      setTargetApps(previous);
+      toast.error('Failed to update target apps');
     }
   }, [targetApps]);
 
   // ─────────────────────────────────────────────────────
-  // Live stats polling
-  // ✅ Fix: (PureShieldPlugin as any).getLiveStats?.() বাদ
-  // সরাসরি typed call করো
+  // Background poll: keeps `running` in sync with native
+  // regardless of what triggered the state change. This ensures
+  // a late-starting service (e.g. after requestProjection gives up
+  // waiting) is still picked up.
   // ─────────────────────────────────────────────────────
   useEffect(() => {
-    if (pollRef.current) {
-      clearInterval(pollRef.current);
-      pollRef.current = null;
+    const poll = async () => {
+      try {
+        const r = await PureShieldPlugin.isRunning();
+        setRunning(prev => (prev !== r.running ? r.running : prev));
+      } catch (e) {
+        // ignore — native bridge may not be ready yet
+      }
+    };
+    poll();
+    runningPollRef.current = setInterval(poll, BACKGROUND_POLL_MS);
+    return () => {
+      if (runningPollRef.current) { clearInterval(runningPollRef.current); runningPollRef.current = null; }
+    };
+  }, []);
+
+  // ─────────────────────────────────────────────────────
+  // Live stats polling — starts as soon as `running` flips true,
+  // whether that came from start()/requestProjection() or the
+  // background reconciliation poll above.
+  // ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (statsPollRef.current) {
+      clearInterval(statsPollRef.current);
+      statsPollRef.current = null;
     }
     if (!running) return;
 
@@ -173,7 +211,7 @@ export function usePureShield() {
         const [adaptive, model, stats] = await Promise.all([
           PureShieldPlugin.getAdaptiveStatus().catch(() => null),
           PureShieldPlugin.getModelStatus().catch(() => null),
-          PureShieldPlugin.getLiveStats().catch(() => null), // ✅ properly typed
+          PureShieldPlugin.getLiveStats().catch(() => null),
         ]);
         if (adaptive) setStatus(adaptive);
         if (model)    setModelStatus(model);
@@ -184,9 +222,9 @@ export function usePureShield() {
     };
 
     poll();
-    pollRef.current = setInterval(poll, 1500);
+    statsPollRef.current = setInterval(poll, 1500);
     return () => {
-      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+      if (statsPollRef.current) { clearInterval(statsPollRef.current); statsPollRef.current = null; }
     };
   }, [running]);
 

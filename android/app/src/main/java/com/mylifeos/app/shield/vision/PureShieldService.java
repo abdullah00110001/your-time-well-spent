@@ -34,6 +34,11 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.*;
 
+import com.mylifeos.app.shield.vision.nsfw.NsfwClassifier;
+import com.mylifeos.app.shield.vision.nsfw.NsfwResult;
+import com.mylifeos.app.shield.vision.nsfw.SkinHeuristicNsfwClassifier;
+import com.mylifeos.app.shield.vision.nsfw.TfliteNsfwClassifier;
+
 public class PureShieldService extends Service {
 
     private static final String TAG       = "PureShieldService";
@@ -41,6 +46,8 @@ public class PureShieldService extends Service {
     private static final int    NOTIF_ID   = 9901;
 
     private int screenWidth, screenHeight, screenDensity;
+    private int captureW, captureH;
+    private DisplayManager.DisplayListener displayListener;
 
     private MediaProjection mediaProjection;
     private VirtualDisplay  virtualDisplay;
@@ -64,6 +71,11 @@ public class PureShieldService extends Service {
 
     private PureShieldAdaptiveEngine adaptiveEngine;
     private PureShieldModelManager   modelManager;
+
+    private SkinHeuristicNsfwClassifier heuristicNsfw;
+    private TfliteNsfwClassifier        tfliteNsfw;
+    public static volatile boolean nsfwLastExplicit = false;
+    public static volatile boolean projectionRevoked = false;
 
     private ExecutorService           inferenceExecutor;
     private ScheduledExecutorService  samplerExecutor;
@@ -103,8 +115,7 @@ public class PureShieldService extends Service {
     private long        lastFaceFrameAtMs = 0L;
     private List<RectF> lastBlurRegions = new ArrayList<>();
 
-    // ✅ Fix 1 — Threshold낮춤: 0.60 → 0.38 (더 많은 face detect)
-    private static final float DETECT_THRESHOLD      = 0.38f;
+    // DETECT_THRESHOLD now comes from PureShieldConfig.confidenceThreshold (clamped [0.05,0.95]).
     private static final float NMS_IOU_THRESHOLD     = 0.25f;
     private static final float DEFAULT_MIN_FACE_FRAC = 0.02f;
     private static final float MAX_FACE_FRAC         = 0.85f;
@@ -125,6 +136,7 @@ public class PureShieldService extends Service {
 
         windowManager  = (WindowManager) getSystemService(WINDOW_SERVICE);
         adaptiveEngine = new PureShieldAdaptiveEngine(this);
+        adaptiveEngine.setOnIntervalChangeListener(newIntervalMs -> rescheduleSampler());
         modelManager   = new PureShieldModelManager(this);
         config         = PureShieldPreferences.loadConfig(this);
         targetPackages = PureShieldPreferences.loadTargetPackages(this);
@@ -147,6 +159,7 @@ public class PureShieldService extends Service {
         });
 
         createNotificationChannel();
+        registerDisplayListener();
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -203,6 +216,7 @@ public class PureShieldService extends Service {
     public void onDestroy() {
         if (adaptiveEngine != null) adaptiveEngine.destroy();
         isRunning.set(false);
+        unregisterDisplayListener();
         stopSampler();
         releaseProjection();
         releaseModels();
@@ -268,13 +282,16 @@ public class PureShieldService extends Service {
                 releaseProjection();
                 restartOnDestroy = false;
                 isRunning.set(false);
+                projectionRevoked = true;
                 clearAllOverlays();
-                lastDebugMessage = "Screen capture stopped";
+                lastDebugMessage = "Screen capture stopped — protection paused";
+                postProjectionRevokedNotification();
             }
         }, new Handler(Looper.getMainLooper()));
 
-        int captureW = adaptiveEngine.getCaptureWidth(screenWidth);
-        int captureH = adaptiveEngine.getCaptureHeight(screenHeight);
+        projectionRevoked = false;
+        captureW = adaptiveEngine.getCaptureWidth(screenWidth);
+        captureH = adaptiveEngine.getCaptureHeight(screenHeight);
 
         imageReader    = ImageReader.newInstance(captureW, captureH, PixelFormat.RGBA_8888, 2);
         virtualDisplay = mediaProjection.createVirtualDisplay(
@@ -300,6 +317,103 @@ public class PureShieldService extends Service {
         if (mediaProjection != null) { mediaProjection.stop();    mediaProjection = null; }
     }
 
+    private void postProjectionRevokedNotification() {
+        try {
+            NotificationManager nm = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+            if (nm == null) return;
+
+            PendingIntent contentPi = null;
+            try {
+                Intent reopen = getPackageManager().getLaunchIntentForPackage(getPackageName());
+                if (reopen != null) {
+                    reopen.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    contentPi = PendingIntent.getActivity(this, 2, reopen,
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+                }
+            } catch (Throwable ignored) {}
+
+            NotificationCompat.Builder b = new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("⚠️ PureShield protection stopped")
+                .setContentText("Screen capture permission was revoked. Open the app to turn PureShield back on.")
+                .setSmallIcon(R.drawable.ic_shield)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setOngoing(false);
+            if (contentPi != null) b.setContentIntent(contentPi);
+            nm.notify(NOTIF_ID + 1, b.build());
+        } catch (Throwable ignored) {}
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Rotation — recreate VirtualDisplay/ImageReader on size change
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private void registerDisplayListener() {
+        try {
+            DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
+            if (dm == null) return;
+            displayListener = new DisplayManager.DisplayListener() {
+                @Override public void onDisplayAdded(int displayId) {}
+                @Override public void onDisplayRemoved(int displayId) {}
+                @Override public void onDisplayChanged(int displayId) {
+                    if (displayId != Display.DEFAULT_DISPLAY) return;
+                    handleRotation();
+                }
+            };
+            dm.registerDisplayListener(displayListener, new Handler(Looper.getMainLooper()));
+        } catch (Throwable t) {
+            Log.w(TAG, "registerDisplayListener failed: " + t.getMessage());
+        }
+    }
+
+    private void unregisterDisplayListener() {
+        if (displayListener == null) return;
+        try {
+            DisplayManager dm = (DisplayManager) getSystemService(DISPLAY_SERVICE);
+            if (dm != null) dm.unregisterDisplayListener(displayListener);
+        } catch (Throwable ignored) {}
+        displayListener = null;
+    }
+
+    private void handleRotation() {
+        if (mediaProjection == null || !isRunning.get()) return;
+        try {
+            DisplayMetrics metrics = new DisplayMetrics();
+            windowManager.getDefaultDisplay().getRealMetrics(metrics);
+            int newScreenWidth  = metrics.widthPixels;
+            int newScreenHeight = metrics.heightPixels;
+            if (newScreenWidth == screenWidth && newScreenHeight == screenHeight) return;
+
+            clearAllOverlays();
+
+            screenWidth   = newScreenWidth;
+            screenHeight  = newScreenHeight;
+            screenDensity = metrics.densityDpi;
+
+            int newCaptureW = adaptiveEngine.getCaptureWidth(screenWidth);
+            int newCaptureH = adaptiveEngine.getCaptureHeight(screenHeight);
+
+            if (virtualDisplay != null) { virtualDisplay.release(); virtualDisplay = null; }
+            if (imageReader    != null) { imageReader.close();      imageReader    = null; }
+
+            captureW = newCaptureW;
+            captureH = newCaptureH;
+            imageReader    = ImageReader.newInstance(captureW, captureH, PixelFormat.RGBA_8888, 2);
+            virtualDisplay = mediaProjection.createVirtualDisplay(
+                "PureShieldCapture", captureW, captureH, screenDensity,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                imageReader.getSurface(), null, null);
+
+            lastBlurRegions = new ArrayList<>();
+            missFrameCount  = 0;
+            lastDebugMessage = "Rotated — recreated capture " + captureW + "x" + captureH
+                + " (screen " + screenWidth + "x" + screenHeight + ")";
+            Log.i(TAG, lastDebugMessage);
+        } catch (Throwable t) {
+            Log.e(TAG, "Rotation handling failed: " + t.getMessage());
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Model Loading
     // ─────────────────────────────────────────────────────────────────────────
@@ -316,6 +430,7 @@ public class PureShieldService extends Service {
         if (!assetExists(faceModel)) {
             if (ensureMlKitFaceDetector()) {
                 faceDetector = null;
+                initNsfwClassifiers();
                 broadcastModelStatus("OK", "ML Kit face fallback");
                 return true;
             }
@@ -362,12 +477,14 @@ public class PureShieldService extends Service {
                 }
             }
             lastGenderModelLoaded = genderClassifier != null;
+            initNsfwClassifiers();
             ensureMlKitFaceDetector();
             broadcastModelStatus("OK", faceModel);
             return true;
         } catch (Throwable e) {
             if (ensureMlKitFaceDetector()) {
                 faceDetector = null;
+                initNsfwClassifiers();
                 broadcastModelStatus("OK", "ML Kit fallback");
                 return true;
             }
@@ -389,6 +506,18 @@ public class PureShieldService extends Service {
         } catch (Throwable mt) { mlKitFaceDetector = null; return false; }
     }
 
+    private void initNsfwClassifiers() {
+        if (heuristicNsfw == null) heuristicNsfw = new SkinHeuristicNsfwClassifier(config);
+        if (tfliteNsfw == null) tfliteNsfw = new TfliteNsfwClassifier(this);
+    }
+
+    /** Returns the real .tflite classifier when a model asset is present, else the heuristic. */
+    private NsfwClassifier getActiveNsfwClassifier() {
+        if (tfliteNsfw != null && tfliteNsfw.isReady()) return tfliteNsfw;
+        if (heuristicNsfw == null) heuristicNsfw = new SkinHeuristicNsfwClassifier(config);
+        return heuristicNsfw;
+    }
+
     private boolean assetExists(String name) {
         if (name == null) return false;
         try {
@@ -396,6 +525,17 @@ public class PureShieldService extends Service {
             long size = fd.getDeclaredLength(); fd.close();
             return size > 10000;
         } catch (Throwable t) { return false; }
+    }
+
+    private void broadcastNsfwDetected(NsfwResult result) {
+        try {
+            Intent i = new Intent("com.mylifeos.app.PURESHIELD_NSFW_DETECTED");
+            i.putExtra("label", result.label.name());
+            i.putExtra("score", result.score);
+            i.putExtra("source", result.sourceName);
+            i.putExtra("package", currentForegroundPackage);
+            sendBroadcast(i);
+        } catch (Throwable ignored) {}
     }
 
     private void broadcastModelStatus(String status, String reason) {
@@ -436,6 +576,8 @@ public class PureShieldService extends Service {
         if (mlKitFaceDetector != null) { try { mlKitFaceDetector.close(); } catch (Throwable ignored) {} mlKitFaceDetector = null; }
         if (genderClassifier  != null) { genderClassifier.close(); genderClassifier  = null; }
         if (gpuDelegate       != null) { gpuDelegate.close();      gpuDelegate       = null; }
+        if (heuristicNsfw     != null) { heuristicNsfw.close();    heuristicNsfw     = null; }
+        if (tfliteNsfw        != null) { tfliteNsfw.close();       tfliteNsfw        = null; }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -561,7 +703,7 @@ public class PureShieldService extends Service {
         for (DetectedFace face : faces) {
             if (rawBlur.size() >= maxFaces) break;
             GenderResult result = estimateGender(bitmap, face.box);
-            boolean blur = shouldBlur(result);
+            boolean blur = shouldBlur(result, face.score);
             if (blur) {
                 // ✅ Fix 4 — scaleToScreenCoords now extends body region
                 RectF screenRect = scaleToScreenCoords(face.box);
@@ -569,6 +711,21 @@ public class PureShieldService extends Service {
                 angles.add(face.angle);
                 totalFacesBlurred.incrementAndGet();
             }
+        }
+
+        List<RectF> faceBoxesForNsfw = new ArrayList<>();
+        for (DetectedFace face : faces) faceBoxesForNsfw.add(face.box);
+        NsfwResult nsfwResult = getActiveNsfwClassifier().classify(bitmap, faceBoxesForNsfw);
+        nsfwLastExplicit = nsfwResult.isExplicit();
+        if (nsfwResult.isExplicit()) {
+            if (!nsfwResult.regions.isEmpty()) {
+                for (RectF r : nsfwResult.regions) rawBlur.add(scaleToScreenCoords(r));
+            } else {
+                // No localized region from the classifier — censor the full frame immediately.
+                rawBlur.clear();
+                rawBlur.add(new RectF(0, 0, screenWidth, screenHeight));
+            }
+            broadcastNsfwDetected(nsfwResult);
         }
 
         List<RectF> toBlur = smoothRegions(rawBlur);
@@ -625,8 +782,10 @@ public class PureShieldService extends Service {
     private static class DetectedFace {
         final RectF box;
         final float angle; // degrees
-        DetectedFace(RectF box, float angle) { this.box = box; this.angle = angle; }
-        DetectedFace(RectF box) { this.box = box; this.angle = 0f; }
+        final float score; // detection confidence 0..1 (1.0 when unknown, e.g. ML Kit)
+        DetectedFace(RectF box, float angle, float score) { this.box = box; this.angle = angle; this.score = score; }
+        DetectedFace(RectF box, float angle) { this(box, angle, 1f); }
+        DetectedFace(RectF box) { this(box, 0f, 1f); }
     }
 
     private List<DetectedFace> detectFaces(Bitmap src, int inputW, int inputH) {
@@ -662,7 +821,8 @@ public class PureShieldService extends Service {
             outputs.put(regIdx, regressors);
             outputs.put(clsIdx, classifiers);
             faceDetector.runForMultipleInputsOutputs(new Object[]{input}, outputs);
-            List<DetectedFace> decoded = decodeBlazeFace(regressors, classifiers, inputW, inputH, DETECT_THRESHOLD, anchorCount, regCoordCount);
+            float detectThreshold = config != null ? config.getConfidenceThreshold() : 0.4f;
+            List<DetectedFace> decoded = decodeBlazeFace(regressors, classifiers, inputW, inputH, detectThreshold, anchorCount, regCoordCount);
             return decoded.isEmpty() ? detectFacesWithMlKit(src, "blazeface-empty") : decoded;
         } catch (Throwable t) { Log.w(TAG, "Multi-output failed: " + t.getMessage()); }
 
@@ -773,7 +933,7 @@ public class PureShieldService extends Service {
         List<DetectedFace> result = new ArrayList<>();
         for (int idx : order) {
             if (suppressed[idx]) continue;
-            result.add(new DetectedFace(boxes.get(idx), angles.get(idx)));
+            result.add(new DetectedFace(boxes.get(idx), angles.get(idx), scores.get(idx)));
             for (int j : order) {
                 if (j == idx || suppressed[j]) continue;
                 if (iou(boxes.get(idx), boxes.get(j)) > iouThreshold) suppressed[j] = true;
@@ -803,8 +963,10 @@ public class PureShieldService extends Service {
     // ─────────────────────────────────────────────────────────────────────────
 
     private GenderResult estimateGender(Bitmap src, RectF faceBox) {
+        // BOTH does not need gender classification — blur decision for BOTH is
+        // based purely on the face detector's own confidence score.
         if (config.getBlurGender() == PureShieldConfig.BlurGender.BOTH)
-            return new GenderResult(0.9f, 0.9f);
+            return new GenderResult(0.5f, 0.5f);
         if (genderClassifier != null) return classifyGenderReal(src, faceBox);
         return new GenderResult(0.5f, 0.5f);
     }
@@ -865,12 +1027,14 @@ public class PureShieldService extends Service {
         } catch (Throwable t) { return new GenderResult(0.5f, 0.5f); }
     }
 
-    private boolean shouldBlur(GenderResult result) {
+    private boolean shouldBlur(GenderResult result, float faceDetectionScore) {
         float threshold = config.getConfidenceThreshold();
         switch (config.getBlurGender()) {
             case FEMALE: return result.femaleProbability > threshold;
             case MALE:   return result.maleProbability   > threshold;
-            case BOTH:   return true;
+            // BOTH: blur any face whose OWN detection confidence clears the
+            // configured threshold — no gender classification needed/run.
+            case BOTH:   return faceDetectionScore >= threshold;
             default:     return false;
         }
     }
@@ -1012,10 +1176,43 @@ public class PureShieldService extends Service {
     }
 
     private void switchModelTier(String tierStr) {
+        PureShieldModelManager.ModelTier previousTier = modelManager.getSelectedTier();
         try {
-            modelManager.setSelectedTier(PureShieldModelManager.ModelTier.valueOf(tierStr));
-            releaseModels(); loadModels();
-        } catch (Exception e) { Log.e(TAG, "Switch failed: " + e.getMessage()); }
+            PureShieldModelManager.ModelTier newTier = PureShieldModelManager.ModelTier.valueOf(tierStr);
+            if (newTier == previousTier) return;
+
+            modelManager.setSelectedTier(newTier);
+            releaseModels();
+
+            if (loadModels()) {
+                lastDebugMessage = "Model tier switched to " + newTier;
+                return;
+            }
+
+            // ── Failure: never leave isRunning=true with a null detector ──
+            Log.e(TAG, "❌ Failed to load models for tier " + newTier + " — reverting to " + previousTier);
+            modelManager.setSelectedTier(previousTier);
+            releaseModels();
+
+            if (loadModels()) {
+                broadcastModelStatus("MODEL_FAILED",
+                    "Switch to " + newTier + " failed — reverted to " + previousTier);
+                lastDebugMessage = "⚠️ Tier switch failed, reverted to " + previousTier;
+                return;
+            }
+
+            // Previous tier also failed to reload — stop the service rather than
+            // running with faceDetector == null && mlKitFaceDetector == null.
+            broadcastModelStatus("MODEL_FAILED", "Tier switch and rollback both failed");
+            lastDebugMessage = "❌ Model tier switch failed; stopping PureShield";
+            isRunning.set(false);
+            stopSampler();
+            releaseProjection();
+            stopSelf();
+        } catch (Exception e) {
+            Log.e(TAG, "Switch failed: " + e.getMessage());
+            broadcastModelStatus("MODEL_FAILED", "Switch failed: " + e.getMessage());
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -1121,6 +1318,10 @@ public class PureShieldService extends Service {
         public static final String UPDATE_CONFIG          = "PureShield.UPDATE_CONFIG";
         public static final String FOREGROUND_APP_CHANGED = "PureShield.FOREGROUND_APP_CHANGED";
         public static final String SWITCH_MODEL_TIER      = "PureShield.SWITCH_MODEL_TIER";
+
+        /** Extra keys — referenced by external senders (e.g. ShieldAccessibilityService). */
+        public static final String EXTRA_PACKAGE = "package";
+        public static final String EXTRA_TIER    = "tier";
     }
 
     public static class GenderResult {

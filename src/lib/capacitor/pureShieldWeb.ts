@@ -1,5 +1,14 @@
 import { WebPlugin } from '@capacitor/core';
-import type { PureShieldPluginInterface, PureShieldConfig, PermissionStatus, AdaptiveStatus, ModelStatus, LiveStats } from './pureShieldPlugin';
+import type {
+  PureShieldPluginInterface,
+  PureShieldConfig,
+  PermissionStatus,
+  AdaptiveStatus,
+  ModelStatus,
+  LiveStats,
+  InstalledApp,
+  DeviceInfo,
+} from './pureShieldPlugin';
 
 /**
  * Web stub — used in browser dev environment.
@@ -8,10 +17,15 @@ import type { PureShieldPluginInterface, PureShieldConfig, PermissionStatus, Ada
 export class PureShieldWeb extends WebPlugin implements PureShieldPluginInterface {
 
   private cfg: PureShieldConfig = {
-    blurGender:           'FEMALE',
-    blurStyle:            'PIXELATE',
-    confidenceThreshold:  0.72,
-    enabled:              false,
+    blurGender:            'FEMALE',
+    blurStyle:             'PIXELATE',
+    confidenceThreshold:   0.72,
+    blurOpacity:           100,
+    blurPaddingPct:        10,
+    minFaceSizePct:        2,
+    maxFaces:              10,
+    debugOverlay:          false,
+    enabled:               false,
     pauseOnBatteryBelow20: true,
   };
 
@@ -28,7 +42,7 @@ export class PureShieldWeb extends WebPlugin implements PureShieldPluginInterfac
   async startPureShield() {
     this.running = true;
     console.log('[PureShield Web] Started (mock)');
-    return { started: true };
+    return { started: true, requiresProjection: false };
   }
 
   async stopPureShield() {
@@ -50,7 +64,7 @@ export class PureShieldWeb extends WebPlugin implements PureShieldPluginInterfac
 
   async getTargetApps() { return { packages: this.targetPackages }; }
 
-  async getInstalledApps() {
+  async getInstalledApps(): Promise<{ apps: InstalledApp[] }> {
     return {
       apps: [
         { packageName: 'com.instagram.android', appName: 'Instagram' },
@@ -93,6 +107,28 @@ export class PureShieldWeb extends WebPlugin implements PureShieldPluginInterfac
       blazeKeptCount: this.running ? 6 : 0,
       overlayCount: this.running ? 6 : 0,
       genderModelLoaded: true,
+      projectionRevoked: false,
     };
   }
+
+  async getDeviceInfo(): Promise<DeviceInfo> {
+    return {
+      autoDetectedTier: 'web',
+      selectedTier: 'web',
+      deviceInfo: 'Browser (stub)',
+      expectedFps: 0,
+      batteryDrain: 0,
+      tierName: 'Web',
+      tierDescription: 'PureShield only runs on Android devices.',
+    };
+  }
+
+  async switchModelTier(_data: { tier: string }) { /* no-op */ }
+
+  // aliases
+  async startService() { return this.startPureShield(); }
+  async stopService() { return this.stopPureShield(); }
+  async isEnabled() { return this.isRunning(); }
+  async saveConfig(config: Partial<PureShieldConfig>) { return this.setConfig(config); }
+  async loadConfig() { return this.getConfig(); }
 }
