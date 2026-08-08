@@ -96,13 +96,6 @@ export interface PureShieldPluginInterface {
   getLiveStats():                Promise<LiveStats>;
   getDeviceInfo():                Promise<DeviceInfo>;
   switchModelTier(data: { tier: string }): Promise<void>;
-
-  // aliases (also exist natively in PureShieldPlugin.java)
-  startService():                Promise<{ started: boolean; requiresProjection?: boolean }>;
-  stopService():                 Promise<void>;
-  isEnabled():                   Promise<{ running: boolean }>;
-  saveConfig(config: Partial<PureShieldConfig>): Promise<void>;
-  loadConfig():                  Promise<PureShieldConfig>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
