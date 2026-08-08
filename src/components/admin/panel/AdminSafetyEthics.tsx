@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -6,20 +6,86 @@ import { Switch } from '@/components/ui/switch';
 import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import {
   ShieldCheck, Heart, AlertTriangle, Eye, Brain, Users,
   Ban, Lightbulb, TrendingDown, Sparkles, Lock, HandHeart
 } from 'lucide-react';
 
-export default function AdminSafetyEthics() {
-  const [ethicalLimits, setEthicalLimits] = useState({
-    maxNudgesPerDay: [5],
-    maxNotificationsPerDay: [8],
-    comparisonExposureLimit: [3],
-    pressureIntensity: [40],
-  });
+const SETTINGS_KEY = 'safety_ethics';
 
-  const saveSettings = () => toast.success('Safety & ethics settings saved');
+type EthicalLimits = {
+  maxNudgesPerDay: number[];
+  maxNotificationsPerDay: number[];
+  comparisonExposureLimit: number[];
+  pressureIntensity: number[];
+};
+
+const DEFAULT_LIMITS: EthicalLimits = {
+  maxNudgesPerDay: [5],
+  maxNotificationsPerDay: [8],
+  comparisonExposureLimit: [3],
+  pressureIntensity: [40],
+};
+
+export default function AdminSafetyEthics() {
+  const { user } = useAuth();
+  const [ethicalLimits, setEthicalLimits] = useState<EthicalLimits>(DEFAULT_LIMITS);
+  const [toggles, setToggles] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const togglesRef = useRef(toggles);
+  togglesRef.current = toggles;
+  const limitsRef = useRef(ethicalLimits);
+  limitsRef.current = ethicalLimits;
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from('app_settings')
+        .select('value')
+        .eq('key', SETTINGS_KEY)
+        .maybeSingle();
+      if (cancelled || !data?.value) return;
+      const value = data.value as { limits?: Partial<EthicalLimits>; toggles?: Record<string, boolean> };
+      if (value.limits) setEthicalLimits({ ...DEFAULT_LIMITS, ...value.limits });
+      if (value.toggles) setToggles(value.toggles);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const persist = useCallback(async (
+    limits: EthicalLimits,
+    nextToggles: Record<string, boolean>,
+    successMessage?: string,
+  ) => {
+    setSaving(true);
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert(
+        { key: SETTINGS_KEY, value: { limits, toggles: nextToggles } as any, updated_by: user?.id ?? null },
+        { onConflict: 'key' },
+      );
+    setSaving(false);
+    if (error) {
+      toast.error('Could not save settings — admin access required');
+      return false;
+    }
+    if (successMessage) toast.success(successMessage);
+    return true;
+  }, [user?.id]);
+
+  const saveSettings = () => {
+    void persist(limitsRef.current, togglesRef.current, 'Safety & ethics settings saved');
+  };
+
+  const setToggle = useCallback((key: string, enabled: boolean) => {
+    const next = { ...togglesRef.current, [key]: enabled };
+    setToggles(next);
+    void persist(limitsRef.current, next);
+  }, [persist]);
+
 
   return (
     <div className="space-y-6">
