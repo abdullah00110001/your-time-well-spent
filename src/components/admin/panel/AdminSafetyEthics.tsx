@@ -245,7 +245,11 @@ export default function AdminSafetyEthics() {
                     <p className="text-sm font-medium">{s.label}</p>
                     <p className="text-xs text-muted-foreground">{s.desc}</p>
                   </div>
-                  <Switch defaultChecked={s.enabled} />
+                  <Switch
+                    checked={toggles[s.label] ?? s.enabled}
+                    onCheckedChange={v => setToggle(s.label, v)}
+                  />
+
                 </div>
               ))}
             </CardContent>
