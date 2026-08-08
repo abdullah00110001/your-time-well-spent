@@ -3,6 +3,12 @@ import { format } from 'date-fns';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import {
+  isNativePlatform,
+  scheduleNativeAlarmShots,
+  cancelNativeAlarmShots,
+} from '@/lib/capacitor/riseAlarmBridge';
+
 
 export type WakeMemberStatusKind =
   | 'pending'
