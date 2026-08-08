@@ -169,10 +169,15 @@ export function useGroupWakeAlarm(groupId: string | null) {
   }, [user, session, groupId, load]);
 
   const sendWakeUpCall = useCallback(async (toUserId: string, message?: string) => {
-    if (!session) return;
+    if (!session || !groupId) return;
     try {
       const { data, error } = await supabase.functions.invoke('send-group-wake', {
-        body: { session_id: session.id, to_user_id: toUserId, custom_message: message || null },
+        body: {
+          group_id: groupId,
+          session_id: session.id,
+          to_user_id: toUserId,
+          custom_message: message || null,
+        },
       });
       if (error) throw error;
       toast.success('Wake-up call sent');
@@ -180,7 +185,7 @@ export function useGroupWakeAlarm(groupId: string | null) {
     } catch (e: any) {
       toast.error(e?.message || 'Could not send wake-up call');
     }
-  }, [session]);
+  }, [session, groupId]);
 
   const upsertAlarm = useCallback(async (input: GroupWakeAlarmInput) => {
     if (!user || !groupId) return;
@@ -203,9 +208,45 @@ export function useGroupWakeAlarm(groupId: string | null) {
   const disableAlarm = useCallback(async () => {
     if (!alarm) return;
     await supabase.from('group_wake_alarms').update({ is_active: false }).eq('id', alarm.id);
+    await cancelNativeAlarmShots(`group-${alarm.id}`);
     toast.success('Alarm disabled');
     void load();
   }, [alarm, load]);
+
+  // Keep the on-device scheduler in sync with the group's active alarm so the
+  // phone actually rings even without a push notification.
+  useEffect(() => {
+    if (!isNativePlatform) return;
+    if (!alarm || !alarm.is_active || !alarm.days_of_week?.length) return;
+
+    const uuid = `group-${alarm.id}`;
+    const [h = '0', m = '0'] = String(alarm.wake_time).split(':');
+    const time = `${h.padStart(2, '0')}:${m.padStart(2, '0')}`;
+
+    let cancelled = false;
+    (async () => {
+      await cancelNativeAlarmShots(uuid);
+      if (cancelled) return;
+      await scheduleNativeAlarmShots(uuid, time, alarm.days_of_week, {
+        title: 'Group Wake-Up',
+        body: 'Your group is waking up — complete your mission!',
+        missionType: alarm.mission_type,
+        extraLoud: true,
+        soundUri: alarm.shared_ringtone_url ?? null,
+      });
+    })();
+
+    return () => { cancelled = true; };
+  }, [
+    alarm?.id,
+    alarm?.is_active,
+    alarm?.wake_time,
+    alarm?.mission_type,
+    alarm?.shared_ringtone_url,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    JSON.stringify(alarm?.days_of_week ?? []),
+  ]);
+
 
   return {
     loading,
