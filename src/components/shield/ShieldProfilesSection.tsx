@@ -157,7 +157,7 @@ export function ShieldProfilesSection({ profiles, onActivate, activeSession, onR
       <h2 className="font-semibold text-lg">Profiles</h2>
 
       {/* Add New Profile Card */}
-      <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+      <Dialog open={showCreateDialog} onOpenChange={(open) => { setShowCreateDialog(open); if (!open) resetForm(); }}>
         <DialogTrigger asChild>
           <Card className="bg-gradient-to-r from-cyan-600/30 to-blue-600/30 border-cyan-500/30 cursor-pointer hover:from-cyan-600/40 hover:to-blue-600/40 transition-colors">
             <CardContent className="flex items-center justify-between p-4">
@@ -173,7 +173,7 @@ export function ShieldProfilesSection({ profiles, onActivate, activeSession, onR
         </DialogTrigger>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create New Profile</DialogTitle>
+            <DialogTitle>{editingId ? 'Edit Profile' : 'Create New Profile'}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-6 gap-2">
@@ -226,7 +226,9 @@ export function ShieldProfilesSection({ profiles, onActivate, activeSession, onR
                 onChange={(e) => setNewProfile(p => ({ ...p, default_duration_minutes: parseInt(e.target.value) || 60 }))} 
               />
             </div>
-            <Button className="w-full" onClick={createProfile}>Create Profile</Button>
+            <Button className="w-full" onClick={saveProfile} disabled={saving}>
+              {saving ? 'Saving…' : editingId ? 'Save Changes' : 'Create Profile'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -247,7 +249,7 @@ export function ShieldProfilesSection({ profiles, onActivate, activeSession, onR
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => {}}>
+                  <DropdownMenuItem onClick={() => openEditDialog(profile)}>
                     <Edit className="h-4 w-4 mr-2" />
                     Edit
                   </DropdownMenuItem>
