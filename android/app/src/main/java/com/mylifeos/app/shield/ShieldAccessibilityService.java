@@ -34,6 +34,8 @@ public class ShieldAccessibilityService extends AccessibilityService {
     private ShieldEscalationManager escalationManager;
     private ShieldAppFirewall firewall;
     private BlockLoopGuard loopGuard;
+    private ShieldTimerManager timerManager;
+
 
     private String lastBlockedPackage = "";
     private String lastBlockedUrl = "";
@@ -95,6 +97,8 @@ public class ShieldAccessibilityService extends AccessibilityService {
         escalationManager = new ShieldEscalationManager(this);
         firewall         = new ShieldAppFirewall(this);
         loopGuard        = new BlockLoopGuard(this);
+        timerManager     = new ShieldTimerManager(this);
+
         loadAdultKeywordsFromAssets();
         loadAdultSitesFromAssets();
         loadMonitoredApps();
@@ -277,7 +281,19 @@ public class ShieldAccessibilityService extends AccessibilityService {
             } else {
                 lastBlockedPackage = "";
             }
+
+            // ==========================================
+            // Feature 1b: Daily time limits (real enforcement)
+            // Throttled + block-rate limited inside ShieldTimerManager, so a user
+            // reopening a limited app can never be trapped in a relaunch loop.
+            // ==========================================
+            try {
+                if (timerManager != null && timerManager.enforce(packageName)) return;
+            } catch (Throwable t) {
+                Log.w(TAG, "Daily limit enforcement failed", t);
+            }
         }
+
 
         // ==========================================
         // Feature 2: Hardcore Protection

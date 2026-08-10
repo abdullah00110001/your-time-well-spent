@@ -2,13 +2,15 @@ import { useState, useEffect, useRef } from 'react';
 import { readLocalAlarms, writeLocalAlarms } from '@/lib/rise/localAlarms';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
-import { Plus, Sunrise } from 'lucide-react';
+import { Sunrise } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { RiseBottomNav } from '@/components/rise/RiseBottomNav';
 import { RiseHeader } from '@/components/rise/RiseHeader';
 import { RiseAlarmCard } from '@/components/rise/RiseAlarmCard';
+import { NextAlarmRing } from '@/components/rise/NextAlarmRing';
+import { missionLabel } from '@/lib/rise/missionLabel';
 import { RiseAlarmEditor } from '@/components/rise/RiseAlarmEditor';
 import { RiseReports } from '@/components/rise/RiseReports';
 import { RiseSettings } from '@/components/rise/RiseSettings';
@@ -70,7 +72,9 @@ export default function RisePage() {
   const [alarms, setAlarms] = useState<RiseAlarm[]>([]);
   const [streak, setStreak] = useState<RiseStreak | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [nextAlarm, setNextAlarm] = useState<{ time: string; countdown: string } | null>(null);
+  const [nextAlarm, setNextAlarm] = useState<
+    { time: string; countdown: string; progress: number; alarm: RiseAlarm } | null
+  >(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState<RiseAlarm | null>(null);
   const [backFlash, setBackFlash] = useState(false);
@@ -251,7 +255,15 @@ export default function RisePage() {
       const diff = closestAlarm.date.getTime() - now.getTime();
       const hours = Math.floor(diff / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      setNextAlarm({ time: closestAlarm.alarm.alarm_time, countdown: `Ring in ${hours} hr. ${minutes} min` });
+      // Fill the arc over the last 12 hours before the alarm.
+      const WINDOW_MS = 12 * 60 * 60 * 1000;
+      const progress = Math.max(0, Math.min(1, 1 - diff / WINDOW_MS));
+      setNextAlarm({
+        time: closestAlarm.alarm.alarm_time,
+        countdown: `Ring in ${hours} hr. ${minutes} min`,
+        progress,
+        alarm: closestAlarm.alarm,
+      });
     } else {
       setNextAlarm(null);
     }
@@ -446,46 +458,22 @@ export default function RisePage() {
         <div className="px-4 mt-4">
           {activeTab === 'alarms' && (
             <div className="space-y-4">
-              {/* Hero: Next Alarm — minimal LifeOS card */}
-              <div className="relative overflow-hidden rounded-2xl bg-card border border-border shadow-sm p-5">
-                <div className="flex items-center gap-2 mb-3 text-muted-foreground">
-                  <Sunrise className="h-4 w-4 text-primary" />
-                  <span className="text-[11px] uppercase tracking-widest font-semibold">Next Alarm</span>
-                </div>
-                {nextAlarm ? (
-                  <>
-                    <div className="flex items-baseline gap-2">
-                      <span className="text-4xl md:text-5xl font-black tabular-nums tracking-tight text-foreground">
-                        {(() => {
-                          const [h, m] = nextAlarm.time.split(':');
-                          const hh = parseInt(h);
-                          const disp = hh > 12 ? hh - 12 : hh === 0 ? 12 : hh;
-                          return `${disp}:${m}`;
-                        })()}
-                      </span>
-                      <span className="text-base font-semibold text-muted-foreground">
-                        {parseInt(nextAlarm.time.split(':')[0]) >= 12 ? 'PM' : 'AM'}
-                      </span>
-                    </div>
-                    <p className="mt-1.5 text-xs text-muted-foreground">{nextAlarm.countdown}</p>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-xl font-bold text-foreground">No alarms set</p>
-                    <p className="text-xs text-muted-foreground mt-1">Tap + to create your first wake-up</p>
-                  </>
-                )}
-              </div>
+              {/* Hero: next-alarm ring */}
+              <NextAlarmRing
+                time={nextAlarm?.time ?? null}
+                countdown={nextAlarm?.countdown ?? null}
+                progress={nextAlarm?.progress ?? 0}
+                intention={nextAlarm?.alarm?.intention ?? null}
+                missionLabel={nextAlarm ? missionLabel(nextAlarm.alarm) : null}
+              />
 
               {/* Alarm list */}
               {alarms.length === 0 ? (
                 <Card className="border-dashed">
                   <CardContent className="py-10 text-center">
                     <Sunrise className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40" />
-                    <h3 className="font-semibold mb-1">No alarms yet</h3>
-                    <p className="text-sm text-muted-foreground">
-                      Tap the + button to create your first alarm
-                    </p>
+                    <h3 className="font-semibold mb-3">What will tomorrow's you thank you for?</h3>
+                    <Button onClick={handleCreateAlarm}>Set tonight's intention</Button>
                   </CardContent>
                 </Card>
               ) : (
@@ -503,14 +491,12 @@ export default function RisePage() {
                 </div>
               )}
 
-              {/* Floating Add button */}
+              {/* Commit CTA */}
               <Button
                 onClick={handleCreateAlarm}
-                className="fixed bottom-24 right-4 h-16 w-16 rounded-full shadow-xl shadow-amber-500/40 bg-gradient-to-br from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 z-40"
-                size="icon"
-                aria-label="Create alarm"
+                className="w-full h-12 rounded-full text-base font-semibold"
               >
-                <Plus className="h-7 w-7" />
+                Commit to tomorrow
               </Button>
             </div>
           )}

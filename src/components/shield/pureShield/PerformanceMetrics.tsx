@@ -16,17 +16,17 @@ export function PerformanceMetrics({ metrics }: PerformanceMetricsProps) {
   }
 
   const batteryColor =
-    metrics.batteryLevel > 50 ? 'text-emerald-500' : metrics.batteryLevel > 20 ? 'text-amber-500' : 'text-red-500';
+    metrics.batteryLevel > 50 ? 'text-primary' : metrics.batteryLevel > 20 ? 'text-primary' : 'text-destructive';
   const thermalColor =
     metrics.thermalStatus === 'Normal'
-      ? 'text-emerald-500'
+      ? 'text-primary'
       : metrics.thermalStatus === 'Warning'
-        ? 'text-amber-500'
-        : 'text-red-500';
+        ? 'text-primary'
+        : 'text-destructive';
 
   const cards = [
     { icon: Cpu, label: 'Device Tier', value: metrics.deviceTier, color: 'text-primary' },
-    { icon: Gauge, label: 'Sample Rate', value: `${metrics.sampleIntervalMs}ms`, color: 'text-violet-500' },
+    { icon: Gauge, label: 'Sample Rate', value: `${metrics.sampleIntervalMs}ms`, color: 'text-primary' },
     { icon: Timer, label: 'Last Inference', value: `${metrics.lastInferenceMs}ms`, color: 'text-cyan-500' },
     { icon: BatteryMedium, label: 'Battery', value: `${metrics.batteryLevel}%`, color: batteryColor },
     { icon: Thermometer, label: 'Thermal', value: metrics.thermalStatus, color: thermalColor },

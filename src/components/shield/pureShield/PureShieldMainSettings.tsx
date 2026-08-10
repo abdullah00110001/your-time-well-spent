@@ -20,6 +20,9 @@ import { PermissionRequestScreen } from './PermissionRequestScreen';
 import { DashboardTab } from './DashboardTab';
 import { StatsTab } from './StatsTab';
 import { TestBlurDemo } from './TestBlurDemo';
+import { PureShieldOnboarding } from './PureShieldOnboarding';
+import { PerformanceModeSettings } from './PerformanceModeSettings';
+import { loadPerf, savePerf } from '@/lib/shield/settingsStore';
 import {
   loadExtras, saveExtras, loadStats, DEFAULT_EXTRAS, type LocalShieldExtras,
 } from './storage';
@@ -41,6 +44,9 @@ export function PureShieldMainSettings({ onBack }: PureShieldMainSettingsProps) 
   const [extras, setExtras] = useState<LocalShieldExtras>(loadExtras);
   const [demoOpen, setDemoOpen] = useState(false);
   const [tab, setTab] = useState('home');
+  const [onboarding, setOnboarding] = useState(false);
+  /** Set when onboarding was opened by a start attempt — resume start after it closes. */
+  const [resumeStart, setResumeStart] = useState(false);
 
   const stats = useMemo(() => loadStats(), [tab]);
   const appLabels = useMemo(
@@ -67,34 +73,67 @@ export function PureShieldMainSettings({ onBack }: PureShieldMainSettingsProps) 
 
   const allPermsGranted = permissions.overlay && permissions.projection;
 
-  const handleToggle = async (v: boolean) => {
-    if (loading) return; // prevent multi-tap
+  /** Actually starts filtering. Assumes guards already passed. */
+  const beginStart = async () => {
     try {
-      if (v) {
-        // Overlay permission is sticky — request once.
-        if (!permissions.overlay) {
-          const granted = await requestOverlay();
-          if (!granted) {
-            toast.error('Overlay permission required');
-            return;
-          }
-        }
-        // Screen capture token is one-shot — always re-request when starting.
-        // This is normal Android behavior, not an error.
-        const projOk = await requestProjection();
-        if (!projOk) {
-          toast.error('Screen capture permission denied');
+      // Overlay permission is sticky — request once.
+      if (!permissions.overlay) {
+        const granted = await requestOverlay();
+        if (!granted) {
+          toast.error('Overlay permission required');
           return;
         }
-        await updateConfig({ enabled: true });
-        toast.success('PureShield activated 🛡️');
-      } else {
+      }
+      // Screen capture token is one-shot — always re-request when starting.
+      // This is normal Android behavior, not an error.
+      const projOk = await requestProjection();
+      if (!projOk) {
+        toast.error('Screen capture permission denied');
+        return;
+      }
+      await updateConfig({ enabled: true });
+      toast.success('PureShield activated 🛡️');
+    } catch (e: any) {
+      toast.error(e?.message || 'Action failed');
+    }
+  };
+
+  const handleToggle = async (v: boolean) => {
+    if (loading) return; // prevent multi-tap
+    if (!v) {
+      try {
         await stop();
         await updateConfig({ enabled: false });
         toast.success('PureShield stopped');
+      } catch (e: any) {
+        toast.error(e?.message || 'Action failed');
       }
-    } catch (e: any) {
-      toast.error(e?.message || 'Action failed');
+      return;
+    }
+
+    // Guard 1 — never start without at least one target app.
+    if (targetApps.length === 0) {
+      toast.error('Please select at least 1 app first');
+      setTab('apps');
+      return;
+    }
+
+    // Guard 2 — first run shows the 3-step onboarding before starting.
+    if (!loadPerf().onboardingDone) {
+      setResumeStart(true);
+      setOnboarding(true);
+      return;
+    }
+
+    await beginStart();
+  };
+
+  const finishOnboarding = async (dontShowAgain: boolean) => {
+    setOnboarding(false);
+    if (dontShowAgain) savePerf({ ...loadPerf(), onboardingDone: true });
+    if (resumeStart) {
+      setResumeStart(false);
+      await beginStart();
     }
   };
 
@@ -276,6 +315,11 @@ export function PureShieldMainSettings({ onBack }: PureShieldMainSettingsProps) 
 
             {/* SETTINGS */}
             <TabsContent value="settings" className="space-y-6 mt-5">
+              <PerformanceModeSettings
+                onNativeConfig={(patch) => updateConfig(patch as any)}
+                fps={liveStats.lastInferenceMs > 0 ? 1000 / liveStats.lastInferenceMs : undefined}
+              />
+
               <Section title="Gender to Blur">
                 <GenderSelector
                   selectedGender={config.blurGender}
@@ -411,6 +455,8 @@ export function PureShieldMainSettings({ onBack }: PureShieldMainSettingsProps) 
       </div>
 
       <TestBlurDemo open={demoOpen} onClose={() => setDemoOpen(false)} style={config.blurStyle} />
+
+      <PureShieldOnboarding open={onboarding} onFinish={finishOnboarding} />
     </div>
   );
 }
@@ -479,8 +525,8 @@ function ModelBanner({
   tone, icon: Icon, title, body,
 }: { tone: 'amber' | 'rose'; icon: any; title: string; body: string }) {
   const t = tone === 'amber'
-    ? 'border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400'
-    : 'border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400';
+    ? 'border-primary/30 bg-primary/5 text-primary '
+    : 'border-destructive/30 bg-destructive/5 text-destructive dark:text-destructive';
   return (
     <div className={`rounded-2xl border p-4 flex gap-3 ${t}`}>
       <Icon className="h-5 w-5 shrink-0 mt-0.5" />

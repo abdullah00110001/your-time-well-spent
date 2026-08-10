@@ -8,6 +8,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { missionLabel } from '@/lib/rise/missionLabel';
 import { MoreVertical } from 'lucide-react';
 
 interface RiseAlarm {
@@ -99,6 +101,12 @@ export function RiseAlarmCard({
               </p>
             )}
 
+            {alarm.intention && (
+              <p className="text-sm italic text-muted-foreground mb-1.5 line-clamp-2">
+                {alarm.intention}
+              </p>
+            )}
+
             <p className="text-xs text-muted-foreground mb-2">{daysSummary}</p>
 
             {/* Day pills */}
@@ -120,10 +128,10 @@ export function RiseAlarmCard({
             </div>
 
             {MissionIcon && (
-              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-primary/10 text-primary text-[11px] font-medium">
+              <Badge variant="secondary" className="gap-1.5 text-[11px] font-medium">
                 <MissionIcon className="h-3 w-3" />
-                {MISSION_NAMES[alarm.verification_type] || 'Mission'}
-              </div>
+                {missionLabel(alarm) || MISSION_NAMES[alarm.verification_type] || 'Mission'}
+              </Badge>
             )}
           </div>
 

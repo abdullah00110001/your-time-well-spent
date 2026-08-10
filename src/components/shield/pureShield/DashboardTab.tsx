@@ -48,13 +48,13 @@ export function DashboardTab({
       {running && liveStats && (
         <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-2">
           <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse" />
             <span className="text-xs font-semibold text-primary uppercase tracking-wider">Live Detection</span>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center">
-            <StatBox label="Frames" value={liveStats.totalFrames} color="text-blue-500" />
-            <StatBox label="Faces" value={liveStats.totalFaces} color="text-amber-500" />
-            <StatBox label="Blurred" value={liveStats.totalBlurred} color="text-emerald-500" />
+            <StatBox label="Frames" value={liveStats.totalFrames} color="text-primary" />
+            <StatBox label="Faces" value={liveStats.totalFaces} color="text-primary" />
+            <StatBox label="Blurred" value={liveStats.totalBlurred} color="text-primary" />
           </div>
           <div className="grid grid-cols-2 gap-2 text-[10px] text-muted-foreground">
             <DebugPill label="Score" value={(liveStats.blazeMaxScore ?? 0).toFixed(2)} />
@@ -80,8 +80,8 @@ export function DashboardTab({
             </span>
           </div>
           {running && (
-            <span className="flex items-center gap-1.5 text-[11px] text-emerald-500 font-medium">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="flex items-center gap-1.5 text-[11px] text-primary font-medium">
+              <span className="h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
               Running
             </span>
           )}
@@ -134,16 +134,16 @@ export function DashboardTab({
       </div>
 
       {/* Trust indicators */}
-      <div className="rounded-2xl border border-emerald-500/20 bg-emerald-500/5 p-4 space-y-3">
+      <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4 space-y-3">
         <div className="flex items-center gap-2 flex-wrap">
-          <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/20">
+          <Badge className="bg-primary/15 text-primary  border-primary/30 hover:bg-primary/20">
             <Lock className="h-3 w-3 mr-1" /> 100% On-Device
           </Badge>
           <Badge variant="outline" className="border-border/60">
             <Brain className="h-3 w-3 mr-1" /> BlazeFace + MobileNetV3
           </Badge>
         </div>
-        <p className="text-xs font-medium text-rose-600 dark:text-rose-400 flex items-center gap-1.5">
+        <p className="text-xs font-medium text-destructive dark:text-destructive flex items-center gap-1.5">
           <ShieldCheck className="h-3.5 w-3.5" />
           No data leaves your phone.
         </p>
@@ -186,8 +186,8 @@ function QuickAction({
 }) {
   const tones = {
     primary: 'border-primary/30 bg-primary/5 text-primary hover:bg-primary/10',
-    amber: 'border-amber-500/30 bg-amber-500/5 text-amber-600 dark:text-amber-400 hover:bg-amber-500/10',
-    rose: 'border-rose-500/30 bg-rose-500/5 text-rose-600 dark:text-rose-400 hover:bg-rose-500/10',
+    amber: 'border-primary/30 bg-primary/5 text-primary  hover:bg-primary/10',
+    rose: 'border-destructive/30 bg-destructive/5 text-destructive dark:text-destructive hover:bg-destructive/10',
   };
   return (
     <motion.button
@@ -216,9 +216,9 @@ function MetricCell({
   tone?: 'good' | 'warn' | 'bad';
 }) {
   const color =
-    tone === 'good' ? 'text-emerald-500'
-    : tone === 'warn' ? 'text-amber-500'
-    : tone === 'bad' ? 'text-rose-500'
+    tone === 'good' ? 'text-primary'
+    : tone === 'warn' ? 'text-primary'
+    : tone === 'bad' ? 'text-destructive'
     : 'text-foreground';
   return (
     <div className="p-3">

@@ -167,10 +167,18 @@
              that never called startForeground(). Blocking is owned by
              ShieldAccessibilityService + ShieldVpnService. -->
 
+        <!-- ✨ Light Orb Timer — foreground service so the countdown keeps
+             running (and the overlay stays alive) while the user is in other apps. -->
         <service
             android:name=".shield.ShieldFloatingService"
             android:enabled="true"
-            android:exported="false" />
+            android:foregroundServiceType="specialUse"
+            android:exported="false">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="focus_session_timer_overlay" />
+        </service>
+
         <service
             android:name=".shield.ShieldAccessibilityService"
             android:enabled="true"

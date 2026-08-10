@@ -587,18 +587,23 @@ public class ShieldPlugin extends Plugin {
     }
 
     // ==========================================
-    // 🪟 FLOATING TIMER
+    // ✨ LIGHT ORB TIMER (foreground, session-driven)
     // ==========================================
+
+    /** Starts/stops the orb overlay itself (independent of whether a session is running). */
     @PluginMethod
     public void toggleFloatingTimer(PluginCall call) {
         boolean enable = call.getBoolean("enable", false);
         preferences.setFloatingTimerEnabled(enable);
 
-        Intent intent = new Intent(getContext(), ShieldFloatingService.class);
         if (enable) {
-            getContext().startService(intent);
+            if (!permissionHelper.hasOverlayPermission()) {
+                call.reject("OVERLAY_PERMISSION_REQUIRED");
+                return;
+            }
+            startOrb(ShieldFloatingService.ACTION_REFRESH, 0);
         } else {
-            getContext().stopService(intent);
+            getContext().stopService(new Intent(getContext(), ShieldFloatingService.class));
         }
         call.resolve();
     }
@@ -608,11 +613,279 @@ public class ShieldPlugin extends Plugin {
         if (call.hasOption("opacity"))
             preferences.setFloatingTimerOpacity(call.getFloat("opacity", 1.0f));
         if (call.hasOption("size"))
-            preferences.setFloatingTimerSize(call.getInt("size", 16));
+            preferences.setOrbSize(call.getInt("size", 64));
         if (call.hasOption("countdown"))
             preferences.setCountdownMode(call.getBoolean("countdown", false));
+        if (call.hasOption("showSeconds"))
+            preferences.setOrbShowSeconds(call.getBoolean("showSeconds", true));
+        if (call.hasOption("pulse"))
+            preferences.setOrbPulseEnabled(call.getBoolean("pulse", true));
+        if (call.hasOption("x") && call.hasOption("y"))
+            preferences.setTimerPosition(call.getInt("x", 0), call.getInt("y", 100));
+
+        if (preferences.isFloatingTimerEnabled()) {
+            startOrb(ShieldFloatingService.ACTION_REFRESH, 0);
+        }
         call.resolve();
     }
+
+    /** Starts a real focus session; the orb renders it and survives backgrounding. */
+    @PluginMethod
+    public void startFocusSession(PluginCall call) {
+        int minutes = call.getInt("minutes", 0);
+        if (minutes <= 0) {
+            call.reject("minutes must be > 0");
+            return;
+        }
+        preferences.startFocusSession(minutes);
+        if (preferences.isFloatingTimerEnabled() && permissionHelper.hasOverlayPermission()) {
+            startOrb(ShieldFloatingService.ACTION_START, minutes);
+        }
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void pauseFocusSession(PluginCall call) {
+        preferences.pauseFocusSession();
+        startOrbIfVisible(ShieldFloatingService.ACTION_PAUSE, 0);
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void resumeFocusSession(PluginCall call) {
+        preferences.resumeFocusSession();
+        startOrbIfVisible(ShieldFloatingService.ACTION_RESUME, 0);
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void addFocusMinutes(PluginCall call) {
+        int minutes = call.getInt("minutes", 5);
+        preferences.addFocusMinutes(minutes);
+        startOrbIfVisible(ShieldFloatingService.ACTION_ADD, minutes);
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void stopFocusSession(PluginCall call) {
+        preferences.stopFocusSession();
+        getContext().stopService(new Intent(getContext(), ShieldFloatingService.class));
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void getFocusSession(PluginCall call) {
+        call.resolve(sessionState());
+    }
+
+    private JSObject sessionState() {
+        JSObject ret = new JSObject();
+        ret.put("active", preferences.hasFocusSession());
+        ret.put("paused", preferences.isFocusSessionPaused());
+        ret.put("remainingMs", preferences.getFocusRemainingMs());
+        ret.put("orbEnabled", preferences.isFloatingTimerEnabled());
+        return ret;
+    }
+
+    private void startOrbIfVisible(String action, int minutes) {
+        if (preferences.isFloatingTimerEnabled() && permissionHelper.hasOverlayPermission()) {
+            startOrb(action, minutes);
+        }
+    }
+
+    private void startOrb(String action, int minutes) {
+        try {
+            Intent i = new Intent(getContext(), ShieldFloatingService.class);
+            i.setAction(action);
+            if (minutes > 0) i.putExtra(ShieldFloatingService.EXTRA_MINUTES, minutes);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(i);
+            } else {
+                getContext().startService(i);
+            }
+        } catch (Throwable t) {
+            Log.e("ShieldPlugin", "Failed to start orb service", t);
+        }
+    }
+
+    // ==========================================
+    // ⏱️ DAILY APP LIMITS (real enforcement)
+    // ==========================================
+    @PluginMethod
+    public void setAppLimit(PluginCall call) {
+        String pkg = call.getString("packageName");
+        if (pkg == null || pkg.isEmpty()) {
+            call.reject("packageName required");
+            return;
+        }
+        if (!permissionHelper.hasUsageStatsPermission()) {
+            call.reject("USAGE_STATS_PERMISSION_REQUIRED");
+            return;
+        }
+        preferences.setAppLimit(pkg, call.getInt("minutes", 0));
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getAppLimits(PluginCall call) {
+        JSObject limits = new JSObject();
+        java.util.Map<String, Integer> map = preferences.getTimeLimits();
+        com.mylifeos.app.shield.ShieldTimerManager tm =
+            new com.mylifeos.app.shield.ShieldTimerManager(getContext());
+        JSObject used = new JSObject();
+        for (java.util.Map.Entry<String, Integer> e : map.entrySet()) {
+            limits.put(e.getKey(), e.getValue());
+            used.put(e.getKey(), tm.getTodayUsageMinutes(e.getKey()));
+        }
+        JSObject ret = new JSObject();
+        ret.put("limits", limits);
+        ret.put("usedMinutes", used);
+        call.resolve(ret);
+    }
+
+    // ==========================================
+    // 🔒 APP LOCK (PIN + device biometric)
+    // ==========================================
+    @PluginMethod
+    public void getAppLockStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("enabled", preferences.isAppLockEnabled());
+        ret.put("hasPin", preferences.hasAppLockPin());
+        ret.put("biometric", preferences.isAppLockBiometricEnabled());
+        ret.put("biometricAvailable", isBiometricAvailable());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void setAppLock(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", false);
+        String pin = call.getString("pin");
+
+        if (enabled) {
+            if (pin != null && pin.length() >= 4) {
+                preferences.setAppLockPin(pin);
+            } else if (!preferences.hasAppLockPin()) {
+                call.reject("PIN_REQUIRED");
+                return;
+            }
+        }
+        preferences.setAppLockEnabled(enabled);
+        if (call.hasOption("biometric")) {
+            preferences.setAppLockBiometricEnabled(call.getBoolean("biometric", true));
+        }
+        if (!enabled) preferences.clearAppLockPin();
+
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void verifyAppLockPin(PluginCall call) {
+        String pin = call.getString("pin", "");
+        JSObject ret = new JSObject();
+        ret.put("valid", preferences.verifyAppLockPin(pin));
+        call.resolve(ret);
+    }
+
+    /** Device biometric / credential prompt. Resolves { authenticated: boolean }. */
+    @PluginMethod
+    public void authenticateBiometric(final PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || getActivity() == null) {
+            call.reject("BIOMETRIC_UNAVAILABLE");
+            return;
+        }
+        try {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                android.hardware.biometrics.BiometricPrompt.Builder b =
+                    new android.hardware.biometrics.BiometricPrompt.Builder(getContext())
+                        .setTitle("Unlock Focus Shield")
+                        .setDescription("Confirm it's you to open Shield settings");
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    b.setAllowedAuthenticators(
+                        android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK
+                            | android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+                } else {
+                    b.setNegativeButton("Use PIN", getContext().getMainExecutor(),
+                        (dialog, which) -> resolveAuth(call, false));
+                }
+
+                b.build().authenticate(
+                    new android.os.CancellationSignal(),
+                    getContext().getMainExecutor(),
+                    new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                        @Override public void onAuthenticationSucceeded(
+                            android.hardware.biometrics.BiometricPrompt.AuthenticationResult result) {
+                            resolveAuth(call, true);
+                        }
+                        @Override public void onAuthenticationError(int code, CharSequence msg) {
+                            resolveAuth(call, false);
+                        }
+                    });
+            });
+        } catch (Throwable t) {
+            call.reject("BIOMETRIC_FAILED", t);
+        }
+    }
+
+    private void resolveAuth(PluginCall call, boolean ok) {
+        if (call.isReleased()) return;
+        JSObject ret = new JSObject();
+        ret.put("authenticated", ok);
+        call.resolve(ret);
+    }
+
+    private boolean isBiometricAvailable() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false;
+            android.hardware.biometrics.BiometricManager bm =
+                (android.hardware.biometrics.BiometricManager)
+                    getContext().getSystemService(Context.BIOMETRIC_SERVICE);
+            return bm != null && bm.canAuthenticate()
+                == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    // ==========================================
+    // 🌅 DAY BOUNDARY / GENERAL PREFS
+    // ==========================================
+    @PluginMethod
+    public void setDayBoundary(PluginCall call) {
+        if (call.hasOption("startHour")) {
+            preferences.setStartOfDayHour(call.getInt("startHour", 0));
+        }
+        if (call.hasOption("autoReset")) {
+            preferences.setAutoResetDailyEnabled(call.getBoolean("autoReset", true));
+        }
+        JSObject ret = new JSObject();
+        ret.put("startHour", preferences.getStartOfDayHour());
+        ret.put("autoReset", preferences.isAutoResetDailyEnabled());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getDayBoundary(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("startHour", preferences.getStartOfDayHour());
+        ret.put("autoReset", preferences.isAutoResetDailyEnabled());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getNotificationSettings(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("vibrate", preferences.isVibrationEnabled());
+        ret.put("sound", preferences.isSoundEnabled());
+        ret.put("lowTimeAlert", preferences.isLowTimeAlertEnabled());
+        call.resolve(ret);
+    }
+
+
 
     // ==========================================
     // 🔐 PERMISSIONS

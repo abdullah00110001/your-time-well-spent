@@ -9,8 +9,8 @@ interface GenderSelectorProps {
 
 const OPTIONS: { value: BlurGender; emoji: string; label: string; ring: string; bg: string }[] = [
   { value: 'FEMALE', emoji: '👩', label: 'Female', ring: 'ring-pink-500/60', bg: 'bg-pink-500/10' },
-  { value: 'MALE', emoji: '👨', label: 'Male', ring: 'ring-blue-500/60', bg: 'bg-blue-500/10' },
-  { value: 'BOTH', emoji: '👥', label: 'Both', ring: 'ring-violet-500/60', bg: 'bg-violet-500/10' },
+  { value: 'MALE', emoji: '👨', label: 'Male', ring: 'ring-primary/60', bg: 'bg-primary/10' },
+  { value: 'BOTH', emoji: '👥', label: 'Both', ring: 'ring-primary/60', bg: 'bg-primary/10' },
 ];
 
 export function GenderSelector({ selectedGender, onGenderChange }: GenderSelectorProps) {

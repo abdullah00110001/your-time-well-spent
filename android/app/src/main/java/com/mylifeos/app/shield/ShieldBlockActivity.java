@@ -282,11 +282,17 @@ public class ShieldBlockActivity extends Activity {
         quoteText.setPadding(0, 0, 0, 60);
 
         TextView blockedText = new TextView(this);
-        blockedText.setText(appName + " is currently blocked.");
+        // Daily-limit blocks explain WHY, so the user doesn't think it's a bug.
+        boolean isLimitBlock = getIntent().getBooleanExtra("IS_LIMIT_BLOCK", false);
+        int limitMinutes = getIntent().getIntExtra("LIMIT_MINUTES", 0);
+        blockedText.setText(isLimitBlock
+            ? appName + " — daily limit of " + limitMinutes + " min reached."
+            : appName + " is currently blocked.");
         blockedText.setTextSize(14);
         blockedText.setTextColor(Color.parseColor("#E2E8F0"));
         blockedText.setGravity(Gravity.CENTER);
         blockedText.setPadding(0, 0, 0, 80);
+
 
         Button btn = buildHomeButton("Go Back Home");
         btn.setOnClickListener(v -> forceUserToHome());

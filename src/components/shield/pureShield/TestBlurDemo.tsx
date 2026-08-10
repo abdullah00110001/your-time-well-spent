@@ -34,7 +34,7 @@ export function TestBlurDemo({ open, onClose, style = 'PIXELATE' }: TestBlurDemo
     style === 'PIXELATE' && '[background-image:repeating-linear-gradient(0deg,hsl(var(--primary)/0.6)_0_4px,transparent_4px_8px),repeating-linear-gradient(90deg,hsl(var(--primary)/0.6)_0_4px,transparent_4px_8px)] [background-size:10px_10px]',
     style === 'FROSTED' && 'backdrop-blur-xl bg-white/30 dark:bg-white/10',
     style === 'SOLID' && 'bg-foreground',
-    style === 'MOSAIC' && '[background-image:radial-gradient(circle_at_30%_30%,hsl(var(--primary)/0.7)_2px,transparent_3px),radial-gradient(circle_at_70%_60%,hsl(var(--violet-500)/0.6)_2px,transparent_3px)] [background-size:14px_14px] bg-foreground/40',
+    style === 'MOSAIC' && '[background-image:radial-gradient(circle_at_30%_30%,hsl(var(--primary)/0.7)_2px,transparent_3px),radial-gradient(circle_at_70%_60%,hsl(var(--primary)/0.6)_2px,transparent_3px)] [background-size:14px_14px] bg-foreground/40',
   );
 
   return (
@@ -50,10 +50,10 @@ export function TestBlurDemo({ open, onClose, style = 'PIXELATE' }: TestBlurDemo
       </div>
 
       <div className="flex-1 flex flex-col items-center justify-center p-6 gap-6">
-        <div className="relative w-64 h-80 rounded-3xl overflow-hidden bg-gradient-to-br from-amber-100 via-orange-100 to-rose-100 dark:from-amber-950/40 dark:via-orange-950/40 dark:to-rose-950/40 border border-border/50">
+        <div className="relative w-64 h-80 rounded-3xl overflow-hidden bg-gradient-to-br from-primary via-primary to-destructive dark:from-primary/40 dark:via-primary/40 dark:to-destructive/40 border border-border/50">
           {/* Mock "person" silhouette */}
           <div className="absolute inset-0 flex items-end justify-center">
-            <div className="w-44 h-56 rounded-t-[100px] bg-gradient-to-b from-amber-300/60 to-amber-500/40 dark:from-amber-700/40 dark:to-amber-900/40" />
+            <div className="w-44 h-56 rounded-t-[100px] bg-gradient-to-b from-primary/60 to-primary/40 dark:from-primary/40 dark:to-primary/40" />
           </div>
           {/* Face circle */}
           <motion.div
@@ -63,7 +63,7 @@ export function TestBlurDemo({ open, onClose, style = 'PIXELATE' }: TestBlurDemo
             transition={{ duration: 0.4 }}
             className="absolute top-10 left-1/2 -translate-x-1/2 w-32 h-32"
           >
-            <div className="relative w-full h-full rounded-full bg-amber-400/80 dark:bg-amber-700/60 border-2 border-primary shadow-[0_0_24px_-6px] shadow-primary/50">
+            <div className="relative w-full h-full rounded-full bg-primary/80 /60 border-2 border-primary shadow-[0_0_24px_-6px] shadow-primary/50">
               <div
                 className={overlayClass}
                 style={{ opacity: intensity / 100, borderRadius: '9999px' }}

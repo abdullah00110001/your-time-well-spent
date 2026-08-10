@@ -600,3 +600,54 @@ input, textarea, [contenteditable="true"] {
 @media (prefers-reduced-motion: reduce) {
   .n2r, .n2r-flame, .n2r-dawn-glow { transition: none; animation: none; }
 }
+
+/* ==========================================================================
+   FOCUS SHIELD — uses the app's default design system (no scoped palette).
+   The `.lantern-*` helpers below are structural only and read from the
+   global semantic tokens so Shield matches every other screen.
+   ========================================================================== */
+.lantern {
+  color: hsl(var(--foreground));
+}
+
+.lantern-panel {
+  border-radius: var(--radius);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card));
+  color: hsl(var(--card-foreground));
+}
+
+.lantern-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+}
+
+.lantern-glow,
+.lantern-halo,
+.lantern-pool,
+.lantern-engrave {
+  background: transparent;
+}
+
+.lantern-halo {
+  background: hsl(var(--primary) / 0.1);
+}
+
+.lantern-nav {
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--background) / 0.9);
+  backdrop-filter: blur(16px);
+}
+
+@keyframes lantern-breathe {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.96); opacity: 0.9; }
+}
+.lantern-breathe { animation: lantern-breathe 4.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lantern-breathe { animation: none; transition: none; }
+}

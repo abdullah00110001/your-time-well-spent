@@ -1,4 +1,5 @@
 import { Switch } from '@/components/ui/switch';
+import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import { Loader2 } from 'lucide-react';
 
@@ -11,28 +12,21 @@ interface MasterToggleProps {
 
 export function MasterToggle({ enabled, onToggle, description, loading }: MasterToggleProps) {
   return (
-    <div
-      className={cn(
-        'rounded-2xl p-5 border transition-all duration-200',
-        enabled
-          ? 'bg-emerald-500/5 border-emerald-500/30 shadow-[0_0_30px_-12px] shadow-emerald-500/30'
-          : 'bg-card border-border/50',
-      )}
-    >
+    <Card className="p-5">
       <div className="flex items-center gap-4">
         <div
           className={cn(
             'h-12 w-12 rounded-xl flex items-center justify-center transition-colors',
-            enabled ? 'bg-emerald-500/15' : 'bg-muted',
+            enabled ? 'bg-primary/10' : 'bg-muted',
           )}
         >
           {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />
+            <Loader2 className="h-4 w-4 animate-spin text-primary" />
           ) : (
             <span
               className={cn(
                 'h-3 w-3 rounded-full transition-colors',
-                enabled ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/40',
+                enabled ? 'bg-primary animate-pulse' : 'bg-muted-foreground/40',
               )}
             />
           )}
@@ -49,13 +43,11 @@ export function MasterToggle({ enabled, onToggle, description, loading }: Master
           checked={enabled}
           disabled={loading}
           onCheckedChange={onToggle}
-          className="data-[state=checked]:bg-emerald-500"
           aria-label="Toggle PureShield"
         />
       </div>
-    </div>
+    </Card>
   );
 }
 
 export default MasterToggle;
-

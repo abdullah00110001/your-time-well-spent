@@ -12,7 +12,7 @@ const STYLES: { value: BlurStyle; icon: string; label: string; description: stri
     icon: '◉',
     label: 'Blur',
     description: 'Soft gaussian',
-    preview: 'bg-gradient-radial from-white/90 via-blue-100/70 to-blue-200/60 backdrop-blur-xl',
+    preview: 'bg-gradient-radial from-white/90 via-primary/70 to-primary/60 backdrop-blur-xl',
   },
   {
     value: 'PIXELATE',
@@ -40,7 +40,7 @@ const STYLES: { value: BlurStyle; icon: string; label: string; description: stri
     icon: '❄️',
     label: 'Frosted',
     description: 'Glass blur',
-    preview: 'bg-gradient-to-br from-white/70 via-blue-100/50 to-blue-200/60 backdrop-blur',
+    preview: 'bg-gradient-to-br from-white/70 via-primary/50 to-primary/60 backdrop-blur',
   },
   {
     value: 'MOSAIC',
@@ -86,7 +86,7 @@ export function BlurStyleSelector({ selectedStyle, onStyleChange }: BlurStyleSel
             >
               {/* BLUR — soft radial preview */}
               {s.value === 'BLUR' && (
-                <div className="w-full h-full rounded-lg bg-gradient-radial from-white via-blue-50/80 to-blue-200/70 flex items-center justify-center">
+                <div className="w-full h-full rounded-lg bg-gradient-radial from-white via-blue-50/80 to-primary/70 flex items-center justify-center">
                   <div className="w-6 h-6 rounded-full bg-white/60 blur-sm" />
                 </div>
               )}

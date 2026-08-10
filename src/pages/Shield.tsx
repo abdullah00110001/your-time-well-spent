@@ -1,7 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { ShieldBottomNav } from '@/components/shield/ShieldBottomNav';
+import { Button } from '@/components/ui/button';
+import { FocusShieldUI } from '@/components/shield/lantern/FocusShieldUI';
+import { useNavigate } from 'react-router-dom';
+import ShieldNativePlugin from '@/lib/capacitor/shieldPlugin';
 import { ShieldHeader } from '@/components/shield/ShieldHeader';
 import { ShieldProfilesSection } from '@/components/shield/ShieldProfilesSection';
 import { ShieldModes } from '@/components/shield/ShieldModes';
@@ -18,6 +21,11 @@ import { BlockAppsPage } from '@/components/shield/pages/BlockAppsPage';
 import { BlockSitesPage } from '@/components/shield/pages/BlockSitesPage';
 import { BlockKeywordsPage } from '@/components/shield/pages/BlockKeywordsPage';
 import { FloatingTimerSettings } from '@/components/shield/FloatingTimerSettings';
+import { BlockScreenSettingsPage } from '@/components/shield/BlockScreenSettingsPage';
+import { OrbTimerSettingsPage } from '@/components/shield/OrbTimerSettingsPage';
+import { BlockingDatabasesPage } from '@/components/shield/BlockingDatabasesPage';
+import { AppLockSettingsPage } from '@/components/shield/AppLockSettingsPage';
+import { DailyLimitsPage } from '@/components/shield/DailyLimitsPage';
 import { PureShieldMainSettings } from '@/components/shield/pureShield/PureShieldMainSettings';
 import { isNative } from '@/lib/capacitor/platform';
 import { App } from '@capacitor/app';
@@ -45,7 +53,7 @@ import {
 
 import type { StrictnessMode } from '@/components/shield/ShieldModes';
 import { normalizeShieldMode } from '@/components/shield/ShieldModes';
-type SubPage = 'main' | 'block-screen' | 'block-apps' | 'block-sites' | 'block-keywords' | 'floating-timer' | 'pure-shield';
+type SubPage = 'main' | 'block-screen' | 'block-apps' | 'block-sites' | 'block-keywords' | 'floating-timer' | 'pure-shield' | 'blocking-db' | 'app-lock' | 'daily-limits';
 
 interface DisciplineProfile {
   id: string;
@@ -101,7 +109,9 @@ const callShieldNative = async (key: string, value: boolean) => {
 
 export default function ShieldPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [modeBusy, setModeBusy] = useState<null | 'focus' | 'sleep' | 'strict'>(null);
   const [subPage, setSubPage] = useState<SubPage>('main');
   const [profiles, setProfiles] = useState<DisciplineProfile[]>([]);
   const [disciplineScore, setDisciplineScore] = useState<DisciplineScore | null>(null);
@@ -368,6 +378,56 @@ export default function ShieldPage() {
     }
   };
 
+  const toggleLanternMode = async (m: 'focus' | 'sleep') => {
+    if (modeBusy) return;
+    if (!isNative) { toast.info('Shield modes are only available in the Android app.'); return; }
+    setModeBusy(m);
+    try {
+      if (strictnessMode === m) {
+        await ShieldNativePlugin.deactivateMode();
+        handleModeChange('normal');
+        toast.info('Shield returned to Normal Mode');
+      } else if (m === 'focus') {
+        await ShieldNativePlugin.activateFocusMode();
+        handleModeChange('focus');
+        toast.success('Focus watch lit');
+      } else {
+        await ShieldNativePlugin.activateSleepMode();
+        handleModeChange('sleep');
+        toast.success('Sleep watch lit');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || `Failed to activate ${m} mode`);
+    } finally {
+      setModeBusy(null);
+    }
+  };
+
+  const toggleLanternStrict = async (on: boolean) => {
+    if (modeBusy) return;
+    if (!isNative) { toast.info('Strict Mode is only available in the Android app.'); return; }
+    setModeBusy('strict');
+    try {
+      if (!on) {
+        await ShieldNativePlugin.deactivateMode();
+        handleModeChange('normal');
+        toast.info('Seal lifted');
+      } else {
+        await ShieldNativePlugin.activateStrictMode();
+        handleModeChange('strict');
+        toast.success('Lantern sealed — it cannot be opened early');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to toggle Strict Mode');
+      try {
+        const data = await ShieldNativePlugin.getCurrentMode();
+        handleModeChange(data?.strict ? 'strict' : normalizeShieldMode(data?.mode));
+      } catch {}
+    } finally {
+      setModeBusy(null);
+    }
+  };
+
   const handleTabChange = (tab: string) => {
     setActiveTab(tab);
     setSubPage('main');
@@ -439,11 +499,15 @@ export default function ShieldPage() {
   const activePermission = getActivePermissionRequest();
   const isBlockingUI = activePermission !== null;
 
-  if (subPage === 'block-screen') return <ShieldBlockScreen onBack={() => setSubPage('main')} />;
+  // V2 screens (the legacy ShieldBlockScreen / FloatingTimerSettings remain in the codebase)
+  if (subPage === 'block-screen') return <BlockScreenSettingsPage onBack={() => setSubPage('main')} />;
   if (subPage === 'block-apps') return <BlockAppsPage onBack={() => setSubPage('main')} />;
   if (subPage === 'block-sites') return <BlockSitesPage onBack={() => setSubPage('main')} />;
   if (subPage === 'block-keywords') return <BlockKeywordsPage onBack={() => setSubPage('main')} />;
-  if (subPage === 'floating-timer') return <FloatingTimerSettings onBack={() => setSubPage('main')} />;
+  if (subPage === 'blocking-db') return <BlockingDatabasesPage onBack={() => setSubPage('main')} />;
+  if (subPage === 'floating-timer') return <OrbTimerSettingsPage onBack={() => setSubPage('main')} />;
+  if (subPage === 'app-lock') return <AppLockSettingsPage onBack={() => setSubPage('main')} />;
+  if (subPage === 'daily-limits') return <DailyLimitsPage onBack={() => setSubPage('main')} />;
   if (subPage === 'pure-shield') return <PureShieldMainSettings onBack={() => setSubPage('main')} />;
 
   if (isLoading) {
@@ -463,96 +527,47 @@ export default function ShieldPage() {
     <div className="min-h-screen bg-background pb-24 relative">
 
       {isBlockingUI && (
-        <div className="fixed inset-0 z-[100] bg-black/70 backdrop-blur-md flex items-center justify-center p-6">
-          <div className="bg-background w-full max-w-sm rounded-3xl shadow-2xl overflow-hidden p-8 text-center animate-in zoom-in-95 duration-200">
-            <span className="text-xs font-bold uppercase tracking-wider text-primary mb-4 block">
+        <div className="fixed inset-0 z-[100] bg-background/80 backdrop-blur-md flex items-center justify-center p-6">
+          <div className="bg-card text-card-foreground border border-border w-full max-w-sm rounded-2xl shadow-lg overflow-hidden p-8 text-center animate-in zoom-in-95 duration-200">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4 block">
               {activePermission.step}
             </span>
             <div className="w-24 h-24 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-6">
               {activePermission.icon}
             </div>
-            <h2 className="text-2xl font-extrabold mb-3">{activePermission.title}</h2>
+            <h2 className="text-xl font-bold mb-3">{activePermission.title}</h2>
             <p className="text-muted-foreground text-sm mb-8 leading-relaxed">
               {activePermission.description}
             </p>
-            <button
-              onClick={activePermission.action}
-              className="w-full py-4 bg-primary text-primary-foreground rounded-2xl font-bold text-lg shadow-lg active:scale-95 transition-all"
-            >
+            <Button onClick={activePermission.action} size="lg" className="w-full">
               Grant Permission
-            </button>
+            </Button>
           </div>
         </div>
       )}
 
       <div className={`transition-opacity duration-300 ${isBlockingUI ? 'opacity-20 pointer-events-none' : 'opacity-100'}`}>
-        <ShieldHeader />
-
-        <div className="px-4 py-4 space-y-4">
-          {activeTab === 'dashboard' && (
-            <>
-              <div className="mb-2">
-                <p className="text-sm text-muted-foreground">Welcome back</p>
-                <h1 className="text-2xl font-bold">{getGreeting()}</h1>
-              </div>
-
-              <ShieldUsageStats onViewDetails={() => handleTabChange('analytics')} />
-
-              <ShieldFocusTimer
-                isSessionActive={!!activeSession}
-                onStartBreak={handleBreakStart}
-                disabled={!!activeSession}
-              />
-
-              <ShieldProfilesSection
-                profiles={profiles}
-                onActivate={startSession}
-                activeSession={activeSession}
-                onRefresh={loadShieldDataLocal}
-              />
-
-              <ShieldQuickActions
-                blockedAppsCount={allBlockedApps.length}
-                blockedSitesCount={allBlockedWebsites.length}
-                blockedKeywordsCount={allBlockedKeywords.length}
-                reelsBlockEnabled={reelsToggle || reelsBlockEnabled}
-                adultBlockEnabled={adultToggle || adultBlockEnabled}
-                onReelsToggle={handleReelsToggle}
-                onAdultToggle={handleAdultToggle}
-                onManageApps={() => setSubPage('block-apps')}
-                onManageSites={() => setSubPage('block-sites')}
-                onManageKeywords={() => setSubPage('block-keywords')}
-              />
-            </>
-          )}
-
-          {activeTab === 'modes' && (
-            <ShieldModes
-              activeMode={strictnessMode}
-              onModeChange={handleModeChange}
-              disciplineScore={disciplineScore?.current_score}
-            />
-          )}
-
-          {activeTab === 'reports' && <ShieldReports />}
-
-          {activeTab === 'analytics' && (
-            <ShieldAnalytics disciplineScore={disciplineScore} />
-          )}
-
-          {activeTab === 'groups' && <LifeosGroupsHome defaultType="shield" />}
-
-          {activeTab === 'settings' && (
+        <FocusShieldUI
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+          streak={disciplineScore?.current_streak_days ?? 0}
+          score={disciplineScore?.current_score ?? 0}
+          mode={strictnessMode as any}
+          modeBusy={modeBusy}
+          onToggleMode={toggleLanternMode}
+          onToggleStrict={toggleLanternStrict}
+          onBack={() => navigate('/')}
+          groupsSlot={<LifeosGroupsHome defaultType="shield" />}
+          settingsSlot={
             <ShieldSettings
               settings={settings}
               onSettingChange={handleSettingChange}
               onNavigate={handleNavigate}
             />
-          )}
-        </div>
-
-        <ShieldBottomNav activeTab={activeTab} onTabChange={handleTabChange} />
+          }
+        />
       </div>
+
     </div>
   );
 }

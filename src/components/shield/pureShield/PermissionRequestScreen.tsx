@@ -20,9 +20,9 @@ export function PermissionRequestScreen({
   const allGranted = overlayGranted && projectionGranted;
 
   return (
-    <div className="space-y-5 animate-in fade-in slide-in-from-bottom-2 duration-500">
+    <div className="space-y-5">
       <div className="text-center py-2">
-        <div className="mx-auto h-16 w-16 rounded-2xl flex items-center justify-center bg-gradient-to-br from-primary/20 via-primary/10 to-violet-500/20 border border-primary/20 mb-3">
+        <div className="mx-auto h-16 w-16 rounded-2xl flex items-center justify-center bg-primary/10 mb-3">
           <Shield className="h-8 w-8 text-primary" />
         </div>
         <h2 className="font-semibold text-lg">PureShield</h2>
@@ -31,7 +31,7 @@ export function PermissionRequestScreen({
         </p>
       </div>
 
-      <Card className="border-border/50">
+      <Card>
         <CardContent className="p-0">
           <PermissionRow
             icon={Layers}
@@ -50,6 +50,7 @@ export function PermissionRequestScreen({
           />
         </CardContent>
       </Card>
+
 
       <div className="space-y-2">
         <Button
@@ -87,7 +88,7 @@ function PermissionRow({ icon: Icon, title, description, granted, onRequest, div
     <div
       className={
         'flex items-center gap-4 p-4 cursor-pointer active:bg-muted/50 transition-colors ' +
-        (divider ? 'border-b border-border/50' : '')
+        (divider ? 'border-b border-border' : '')
       }
       onClick={!granted ? onRequest : undefined}
     >
@@ -98,7 +99,7 @@ function PermissionRow({ icon: Icon, title, description, granted, onRequest, div
         <div className="flex items-center gap-2">
           <h3 className="font-medium text-sm">{title}</h3>
           {granted ? (
-            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            <CheckCircle2 className="h-4 w-4 text-primary" />
           ) : (
             <XCircle className="h-4 w-4 text-muted-foreground" />
           )}

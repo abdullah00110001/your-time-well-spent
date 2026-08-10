@@ -218,7 +218,25 @@ public class ShieldPreferences {
     public boolean isLowTimeAlertEnabled() { return prefs.getBoolean("low_time_alert", true); }
     public void setLowTimeAlert(boolean a) { prefs.edit().putBoolean("low_time_alert", a).apply(); }
 
-    public int getAppLimit(String pkg) { return prefs.getInt("limit_" + pkg, 0); }
+    /**
+     * Per-app daily limit in minutes (0 = unlimited).
+     * NOTE: reads the SAME "time_limits" JSON that {@link #setTimeLimits(Map)} writes.
+     * It previously read a "limit_<pkg>" int key that nothing ever wrote, so every
+     * configured limit silently resolved to 0 (limits were dead).
+     */
+    public int getAppLimit(String pkg) {
+        if (pkg == null) return 0;
+        Integer v = getTimeLimits().get(pkg);
+        return v == null ? 0 : v;
+    }
+
+    public void setAppLimit(String pkg, int minutes) {
+        Map<String, Integer> limits = getTimeLimits();
+        if (minutes <= 0) limits.remove(pkg);
+        else limits.put(pkg, minutes);
+        setTimeLimits(limits);
+    }
+
 
     // ==========================================
     // 📅 Reset Dates
@@ -297,4 +315,136 @@ public Set<String> getMonitoredApps() {
 public void setMonitoredApps(Set<String> apps) {
     prefs.edit().putStringSet("monitored_apps", apps).apply();
 }
+
+// ==========================================
+// ✨ Light Orb Timer — style + real session state
+// ==========================================
+public boolean isOrbShowSeconds() { return prefs.getBoolean("orb_show_seconds", true); }
+public void setOrbShowSeconds(boolean v) { prefs.edit().putBoolean("orb_show_seconds", v).apply(); }
+
+public boolean isOrbPulseEnabled() { return prefs.getBoolean("orb_pulse", true); }
+public void setOrbPulseEnabled(boolean v) { prefs.edit().putBoolean("orb_pulse", v).apply(); }
+
+/** Orb diameter in dp (44–112). */
+public int getOrbSize() { return prefs.getInt("orb_size", 64); }
+public void setOrbSize(int dp) { prefs.edit().putInt("orb_size", dp).apply(); }
+
+/**
+ * The session is stored as a wall-clock end timestamp (not a counter), so the
+ * remaining time survives process death, service restarts and doze.
+ */
+public boolean hasFocusSession() {
+    return prefs.getLong("focus_end_ms", 0) > 0 || prefs.getLong("focus_paused_remaining_ms", 0) > 0;
 }
+
+public boolean isFocusSessionPaused() {
+    return prefs.getBoolean("focus_paused", false);
+}
+
+public long getFocusRemainingMs() {
+    if (isFocusSessionPaused()) return prefs.getLong("focus_paused_remaining_ms", 0);
+    long end = prefs.getLong("focus_end_ms", 0);
+    if (end <= 0) return 0;
+    return Math.max(0, end - System.currentTimeMillis());
+}
+
+public void startFocusSession(int minutes) {
+    prefs.edit()
+        .putLong("focus_end_ms", System.currentTimeMillis() + minutes * 60_000L)
+        .putBoolean("focus_paused", false)
+        .putLong("focus_paused_remaining_ms", 0)
+        .apply();
+}
+
+public void pauseFocusSession() {
+    if (isFocusSessionPaused()) return;
+    long remaining = getFocusRemainingMs();
+    prefs.edit()
+        .putBoolean("focus_paused", true)
+        .putLong("focus_paused_remaining_ms", remaining)
+        .putLong("focus_end_ms", 0)
+        .apply();
+}
+
+public void resumeFocusSession() {
+    if (!isFocusSessionPaused()) return;
+    long remaining = prefs.getLong("focus_paused_remaining_ms", 0);
+    prefs.edit()
+        .putBoolean("focus_paused", false)
+        .putLong("focus_paused_remaining_ms", 0)
+        .putLong("focus_end_ms", System.currentTimeMillis() + remaining)
+        .apply();
+}
+
+public void addFocusMinutes(int minutes) {
+    if (isFocusSessionPaused()) {
+        long r = prefs.getLong("focus_paused_remaining_ms", 0) + minutes * 60_000L;
+        prefs.edit().putLong("focus_paused_remaining_ms", Math.max(0, r)).apply();
+    } else {
+        long end = prefs.getLong("focus_end_ms", System.currentTimeMillis());
+        prefs.edit().putLong("focus_end_ms", end + minutes * 60_000L).apply();
+    }
+}
+
+public void stopFocusSession() {
+    prefs.edit()
+        .putLong("focus_end_ms", 0)
+        .putBoolean("focus_paused", false)
+        .putLong("focus_paused_remaining_ms", 0)
+        .apply();
+}
+
+// ==========================================
+// 🔒 App Lock (protects Focus Shield itself)
+// ==========================================
+public boolean isAppLockEnabled() { return prefs.getBoolean("app_lock_enabled", false); }
+public void setAppLockEnabled(boolean v) { prefs.edit().putBoolean("app_lock_enabled", v).apply(); }
+
+public boolean isAppLockBiometricEnabled() { return prefs.getBoolean("app_lock_biometric", true); }
+public void setAppLockBiometricEnabled(boolean v) { prefs.edit().putBoolean("app_lock_biometric", v).apply(); }
+
+/** Stores only a salted hash — the raw PIN is never persisted. */
+public void setAppLockPin(String pin) {
+    prefs.edit().putString("app_lock_pin_hash", hashPin(pin)).apply();
+}
+
+public boolean hasAppLockPin() {
+    String h = prefs.getString("app_lock_pin_hash", "");
+    return h != null && !h.isEmpty();
+}
+
+public boolean verifyAppLockPin(String pin) {
+    String stored = prefs.getString("app_lock_pin_hash", "");
+    if (stored == null || stored.isEmpty()) return false;
+    return stored.equals(hashPin(pin));
+}
+
+public void clearAppLockPin() {
+    prefs.edit().remove("app_lock_pin_hash").apply();
+}
+
+private String hashPin(String pin) {
+    try {
+        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+        byte[] out = md.digest(("shield_v2$" + pin).getBytes("UTF-8"));
+        StringBuilder sb = new StringBuilder();
+        for (byte b : out) sb.append(String.format("%02x", b));
+        return sb.toString();
+    } catch (Exception e) {
+        return "";
+    }
+}
+
+// ==========================================
+// 🌅 Day boundary + general notification prefs
+// ==========================================
+/** Hour (0–23) at which daily counters/limits reset. */
+public int getStartOfDayHour() { return prefs.getInt("start_of_day_hour", 0); }
+public void setStartOfDayHour(int hour) {
+    prefs.edit().putInt("start_of_day_hour", Math.max(0, Math.min(23, hour))).apply();
+}
+
+public boolean isAutoResetDailyEnabled() { return prefs.getBoolean("auto_reset_daily", true); }
+public void setAutoResetDailyEnabled(boolean v) { prefs.edit().putBoolean("auto_reset_daily", v).apply(); }
+}
+

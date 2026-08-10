@@ -88,11 +88,11 @@ export function StatsTab({ stats, appLabels }: StatsTabProps) {
   return (
     <div className="space-y-6 mt-5">
       {/* Lifetime counter */}
-      <div className="rounded-2xl border border-primary/30 bg-gradient-to-br from-primary/10 via-primary/5 to-violet-500/10 p-5 text-center">
+      <div className="rounded-2xl border border-primary/30 bg-primary/5 p-5 text-center">
         <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
           Total Faces Protected
         </div>
-        <div className="text-4xl font-bold bg-gradient-to-br from-primary to-violet-500 bg-clip-text text-transparent">
+        <div className="text-4xl font-bold text-primary">
           {lifetime.toLocaleString()}
         </div>
         <div className="text-xs text-muted-foreground mt-2">
@@ -190,19 +190,19 @@ export function StatsTab({ stats, appLabels }: StatsTabProps) {
               className={cn(
                 'rounded-xl border p-3',
                 a.unlocked
-                  ? 'border-amber-500/40 bg-amber-500/5'
+                  ? 'border-primary/40 bg-primary/5'
                   : 'border-border/50 bg-card opacity-60',
               )}
             >
               <a.icon
                 className={cn(
                   'h-5 w-5 mb-1.5',
-                  a.unlocked ? 'text-amber-500' : 'text-muted-foreground',
+                  a.unlocked ? 'text-primary' : 'text-muted-foreground',
                 )}
               />
               <div className="text-xs font-semibold flex items-center gap-1.5">
                 {a.label}
-                {a.unlocked && <Badge className="h-4 text-[9px] bg-amber-500/20 text-amber-600 dark:text-amber-400 border-0 px-1.5">UNLOCKED</Badge>}
+                {a.unlocked && <Badge className="h-4 text-[9px] bg-primary/20 text-primary  border-0 px-1.5">UNLOCKED</Badge>}
               </div>
               <div className="text-[10px] text-muted-foreground mt-0.5">{a.hint}</div>
             </div>

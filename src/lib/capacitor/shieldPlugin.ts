@@ -77,7 +77,7 @@ export interface ShieldPluginInterface {
   }): Promise<{ success: boolean }>;
   getAdultFilterScreen(): Promise<{ style: string; customMessage: string }>;
 
-  // 🔑 Emergency Bypass & Floating Timer
+  // 🔑 Emergency Bypass & Light Orb Timer
   setEmergencyPin(options: { pin: string }): Promise<void>;
   triggerEmergencyBypass(options: { pin: string }): Promise<{ success: boolean }>;
   toggleFloatingTimer(options: { enable: boolean }): Promise<void>;
@@ -85,11 +85,61 @@ export interface ShieldPluginInterface {
     opacity?: number;
     size?: number;
     countdown?: boolean;
+    showSeconds?: boolean;
+    pulse?: boolean;
+    x?: number;
+    y?: number;
     icon?: string;
     format?: string;
     theme?: string;
   }): Promise<void>;
+
+  // ✨ Focus session (drives the native Light Orb; survives backgrounding)
+  startFocusSession(options: { minutes: number }): Promise<FocusSessionState>;
+  pauseFocusSession(): Promise<FocusSessionState>;
+  resumeFocusSession(): Promise<FocusSessionState>;
+  addFocusMinutes(options: { minutes: number }): Promise<FocusSessionState>;
+  stopFocusSession(): Promise<FocusSessionState>;
+  getFocusSession(): Promise<FocusSessionState>;
+
+  // ⏱️ Daily app limits (enforced natively by ShieldTimerManager)
+  setAppLimit(options: { packageName: string; minutes: number }): Promise<{ success: boolean }>;
+  getAppLimits(): Promise<{
+    limits: Record<string, number>;
+    usedMinutes: Record<string, number>;
+  }>;
+
+  // 🔒 App Lock
+  getAppLockStatus(): Promise<AppLockStatus>;
+  setAppLock(options: { enabled: boolean; pin?: string; biometric?: boolean }): Promise<{ success: boolean }>;
+  verifyAppLockPin(options: { pin: string }): Promise<{ valid: boolean }>;
+  authenticateBiometric(): Promise<{ authenticated: boolean }>;
+
+  // 🌅 Day boundary / notification prefs
+  setDayBoundary(options: { startHour?: number; autoReset?: boolean }): Promise<DayBoundary>;
+  getDayBoundary(): Promise<DayBoundary>;
+  getNotificationSettings(): Promise<{ vibrate: boolean; sound: boolean; lowTimeAlert: boolean }>;
 }
+
+export interface FocusSessionState {
+  active: boolean;
+  paused: boolean;
+  remainingMs: number;
+  orbEnabled: boolean;
+}
+
+export interface AppLockStatus {
+  enabled: boolean;
+  hasPin: boolean;
+  biometric: boolean;
+  biometricAvailable: boolean;
+}
+
+export interface DayBoundary {
+  startHour: number;
+  autoReset: boolean;
+}
+
 
 const Shield = registerPlugin<ShieldPluginInterface>('Shield');
 export default Shield;

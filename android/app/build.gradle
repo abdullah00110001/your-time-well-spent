@@ -25,22 +25,20 @@ android {
 
     signingConfigs {
         release {
-            storeFile file('mylifeos-release-v2.keystore')
-            storePassword 'lifeos123456'
-            keyAlias 'mylifeos-v2'
-            keyPassword 'lifeos123456'
-            // Explicitly enable ALL APK signature schemes. Without v1 enabled,
-            // tools like `keytool -printcert -jarfile` and `jarsigner -verify`
-            // report "not a signed jar file" even though the APK is v2/v3 signed.
-            // v1 is also required for reliable install on Android 6 and below,
-            // and avoids some OEM installer quirks on older devices.
+            storeFile file(project.findProperty('MYLIFEOS_STORE_FILE') ?: 'mylifeos-release-v2.keystore')
+            storePassword project.findProperty('MYLIFEOS_STORE_PASSWORD') ?: 'lifeos123456'
+            keyAlias project.findProperty('MYLIFEOS_KEY_ALIAS') ?: 'mylifeos-v2'
+            keyPassword project.findProperty('MYLIFEOS_KEY_PASSWORD') ?: 'lifeos123456'
             enableV1Signing true
             enableV2Signing true
             enableV3Signing true
-            enableV4Signing true
+            enableV4Signing false
         }
     }
 
+    packagingOptions {
+        jniLibs { useLegacyPackaging false }
+    }
 
     testOptions {
         unitTests {
@@ -61,6 +59,16 @@ android {
             // GitHub Actions run generates a new ephemeral debug.keystore and
             // the resulting APK cannot install over any previous install).
             signingConfig signingConfigs.release
+        }
+    }
+}
+
+// Never allow a release task to silently emit an unsigned APK.
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.path.contains('Release') && it.name.startsWith('assemble') }) {
+        def keystore = android.signingConfigs.release.storeFile
+        if (keystore == null || !keystore.exists() || keystore.length() < 100) {
+            throw new GradleException("Release keystore missing/corrupt: ${keystore}")
         }
     }
 }

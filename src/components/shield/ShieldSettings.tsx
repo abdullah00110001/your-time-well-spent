@@ -68,6 +68,29 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, []);
 
+  const [dayBoundary, setDayBoundary] = useState({ startHour: 0, autoReset: true });
+  const [notifPrefs, setNotifPrefs] = useState({ vibrate: true, sound: false, lowTimeAlert: true });
+
+  useEffect(() => {
+    if (Capacitor.getPlatform() !== 'android') return;
+    ShieldPlugin.getDayBoundary().then(setDayBoundary).catch(() => null);
+    ShieldPlugin.getNotificationSettings().then(setNotifPrefs).catch(() => null);
+  }, []);
+
+  // Notification prefs are owned by native SharedPreferences so the blocking
+  // services honour them immediately — no local-only dummy state.
+  const handleNotificationToggle = async (key: 'vibrate' | 'sound' | 'lowTimeAlert', value: boolean) => {
+    const previous = notifPrefs;
+    setNotifPrefs((p) => ({ ...p, [key]: value }));
+    try {
+      await ShieldPlugin.updateNotificationSettings({ key, value });
+      if (key === 'lowTimeAlert') onSettingChange('lowTimeAlert', value);
+    } catch {
+      setNotifPrefs(previous);
+      toast.error('Could not update notification setting');
+    }
+  };
+
   const checkPermissionStatus = async () => {
     if (Capacitor.getPlatform() !== 'android') return;
     try {
@@ -206,10 +229,30 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
     {
       icon: Clock,
       title: 'Start of Day',
-      description: 'Set when your day resets (default: midnight)',
+      description: `Daily counters reset at ${String(dayBoundary.startHour).padStart(2, '0')}:00`,
       hasArrow: true,
+      onClick: async () => {
+        const input = window.prompt('Reset daily limits at which hour? (0-23)', String(dayBoundary.startHour));
+        if (input === null) return;
+        const hour = parseInt(input, 10);
+        if (isNaN(hour) || hour < 0 || hour > 23) return toast.error('Enter an hour between 0 and 23');
+        try {
+          const res = await ShieldPlugin.setDayBoundary({ startHour: hour });
+          setDayBoundary(res);
+          toast.success(`Day now starts at ${String(res.startHour).padStart(2, '0')}:00`);
+        } catch { toast.error('Could not update day boundary'); }
+      },
       iconColor: 'text-sky-500',
       iconBg: 'bg-sky-500/10',
+    },
+    {
+      icon: Timer,
+      title: 'Daily Limits',
+      description: 'Set per-app time budgets that actually block',
+      hasArrow: true,
+      onClick: () => onNavigate('daily-limits'),
+      iconColor: 'text-amber-500',
+      iconBg: 'bg-amber-500/10',
     },
     {
       icon: Timer,
@@ -226,8 +269,8 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
       title: 'Low Time Alert',
       description: 'Get alerts when time limit is running out',
       hasToggle: true,
-      toggleValue: settings.lowTimeAlert,
-      onToggle: (value) => onSettingChange('lowTimeAlert', value),
+      toggleValue: notifPrefs.lowTimeAlert,
+      onToggle: (value) => handleNotificationToggle('lowTimeAlert', value),
       iconColor: 'text-amber-500',
       iconBg: 'bg-amber-500/10',
     },
@@ -246,7 +289,13 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
       title: 'Auto-Reset Daily',
       description: 'Automatically reset limits each day',
       hasToggle: true,
-      toggleValue: true,
+      toggleValue: dayBoundary.autoReset,
+      onToggle: async (value) => {
+        try {
+          const res = await ShieldPlugin.setDayBoundary({ autoReset: value });
+          setDayBoundary(res);
+        } catch { toast.error('Could not update auto-reset'); }
+      },
       iconColor: 'text-indigo-500',
       iconBg: 'bg-indigo-500/10',
     },
@@ -267,7 +316,8 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
       title: 'Vibration Alerts',
       description: 'Vibrate when blocking apps',
       hasToggle: true,
-      toggleValue: true,
+      toggleValue: notifPrefs.vibrate,
+      onToggle: (v) => handleNotificationToggle('vibrate', v),
       iconColor: 'text-violet-500',
       iconBg: 'bg-violet-500/10',
     },
@@ -276,7 +326,8 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
       title: 'Sound Effects',
       description: 'Play sound when sessions start/end',
       hasToggle: true,
-      toggleValue: false,
+      toggleValue: notifPrefs.sound,
+      onToggle: (v) => handleNotificationToggle('sound', v),
       iconColor: 'text-cyan-500',
       iconBg: 'bg-cyan-500/10',
     },
@@ -292,6 +343,15 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
       iconColor: 'text-green-600',
       iconBg: 'bg-green-600/10',
       status: permissionStatus.deviceAdmin ? 'granted' : 'denied',
+    },
+    {
+      icon: Lock,
+      title: 'App Lock',
+      description: 'Require PIN or fingerprint to open Focus Shield',
+      hasArrow: true,
+      onClick: () => onNavigate('app-lock'),
+      iconColor: 'text-amber-500',
+      iconBg: 'bg-amber-500/10',
     },
     {
       icon: KeyRound,

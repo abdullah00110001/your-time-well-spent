@@ -150,14 +150,14 @@ export function AppSelectorList({
                   checked && 'bg-primary/5',
                 )}
               >
-                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary/30 to-violet-500/30 flex items-center justify-center text-xs font-semibold shrink-0">
+                <div className="h-10 w-10 rounded-full bg-primary/15 flex items-center justify-center text-xs font-semibold shrink-0">
                   {initials(app.appName)}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate flex items-center gap-1.5">
                     {app.appName}
                     {recommended && (
-                      <Badge variant="outline" className="h-4 text-[9px] px-1.5 border-amber-500/40 text-amber-600 dark:text-amber-400">
+                      <Badge variant="outline" className="h-4 text-[9px] px-1.5 border-primary/40 text-primary ">
                         <Sparkles className="h-2.5 w-2.5 mr-0.5" />
                         REC
                       </Badge>
