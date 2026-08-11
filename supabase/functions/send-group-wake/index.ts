@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
     if (insertErr) return json({ error: insertErr.message }, 500);
 
     // Bump received counter on member status (best-effort)
-    await admin.rpc('exec_sql', {}).catch(() => {});
+
     const { data: existing } = await admin
       .from('group_wake_member_status')
       .select('id, wake_up_calls_received')

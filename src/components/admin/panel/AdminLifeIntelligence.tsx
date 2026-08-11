@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -53,6 +53,8 @@ const lifeBalanceData = [
   { area: 'Rest', current: 35, target: 60 },
 ];
 
+const SETTINGS_KEY = 'life_intelligence';
+
 export default function AdminLifeIntelligence() {
   const [maxDailyLoad, setMaxDailyLoad] = useState([75]);
   const [maxWeeklyLoad, setMaxWeeklyLoad] = useState([350]);
@@ -60,20 +62,77 @@ export default function AdminLifeIntelligence() {
   const [forceRestDays, setForceRestDays] = useState(true);
   const [lockAggressivePlanning, setLockAggressivePlanning] = useState(false);
   const [survivalModeAuto, setSurvivalModeAuto] = useState(true);
+  const [toggles, setToggles] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
   const [userStats, setUserStats] = useState({ totalUsers: 0, atRisk: 0, burnout: 0, thriving: 0 });
 
+  const togglesRef = useRef(toggles);
+  togglesRef.current = toggles;
+
   useEffect(() => {
-    fetchStats();
+    let cancelled = false;
+    (async () => {
+      const [{ count: total }, { data: settings }] = await Promise.all([
+        supabase.from('profiles').select('user_id', { count: 'exact', head: true }),
+        supabase.from('app_settings').select('value').eq('key', SETTINGS_KEY).maybeSingle(),
+      ]);
+      if (cancelled) return;
+      setUserStats({
+        totalUsers: total || 0,
+        atRisk: Math.round((total || 0) * 0.15),
+        burnout: Math.round((total || 0) * 0.08),
+        thriving: Math.round((total || 0) * 0.35),
+      });
+      const value = settings?.value as {
+        load?: { maxDailyLoad?: number[]; maxWeeklyLoad?: number[]; autoReduceLoad?: boolean; forceRestDays?: boolean; lockAggressivePlanning?: boolean; survivalModeAuto?: boolean };
+        toggles?: Record<string, boolean>;
+      } | undefined;
+      if (value?.load) {
+        if (value.load.maxDailyLoad) setMaxDailyLoad(value.load.maxDailyLoad);
+        if (value.load.maxWeeklyLoad) setMaxWeeklyLoad(value.load.maxWeeklyLoad);
+        if (typeof value.load.autoReduceLoad === 'boolean') setAutoReduceLoad(value.load.autoReduceLoad);
+        if (typeof value.load.forceRestDays === 'boolean') setForceRestDays(value.load.forceRestDays);
+        if (typeof value.load.lockAggressivePlanning === 'boolean') setLockAggressivePlanning(value.load.lockAggressivePlanning);
+        if (typeof value.load.survivalModeAuto === 'boolean') setSurvivalModeAuto(value.load.survivalModeAuto);
+      }
+      if (value?.toggles) setToggles(value.toggles);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
-  const fetchStats = async () => {
-    const { count: total } = await supabase.from('profiles').select('user_id', { count: 'exact', head: true });
-    setUserStats({ totalUsers: total || 0, atRisk: Math.round((total || 0) * 0.15), burnout: Math.round((total || 0) * 0.08), thriving: Math.round((total || 0) * 0.35) });
+  const persist = useCallback(async (
+    load: Record<string, unknown>,
+    nextToggles: Record<string, boolean>,
+    successMessage?: string,
+  ) => {
+    setSaving(true);
+    const { error } = await supabase
+      .from('app_settings')
+      .upsert({ key: SETTINGS_KEY, value: { load, toggles: nextToggles } as any }, { onConflict: 'key' });
+    setSaving(false);
+    if (error) {
+      toast.error('Could not save settings — admin access required');
+      return;
+    }
+    if (successMessage) toast.success(successMessage);
+  }, []);
+
+  const currentLoad = {
+    maxDailyLoad, maxWeeklyLoad, autoReduceLoad, forceRestDays, lockAggressivePlanning, survivalModeAuto,
   };
+  const loadRef = useRef(currentLoad);
+  loadRef.current = currentLoad;
+
+  const setToggle = useCallback((key: string, enabled: boolean) => {
+    const next = { ...togglesRef.current, [key]: enabled };
+    setToggles(next);
+    void persist(loadRef.current, next);
+  }, [persist]);
 
   const saveLoadSettings = () => {
-    toast.success('Life load settings saved');
+    void persist(loadRef.current, togglesRef.current, 'Life load settings saved');
   };
+
 
   return (
     <div className="space-y-6">
@@ -164,7 +223,7 @@ export default function AdminLifeIntelligence() {
                     <Switch checked={toggle.checked} onCheckedChange={toggle.onChange} />
                   </div>
                 ))}
-                <Button onClick={saveLoadSettings} className="w-full">Save Load Settings</Button>
+                <Button onClick={saveLoadSettings} disabled={saving} className="w-full">{saving ? 'Saving…' : 'Save Load Settings'}</Button>
               </CardContent>
             </Card>
           </div>
@@ -262,7 +321,7 @@ export default function AdminLifeIntelligence() {
                       <p className="text-sm font-medium">{r.label}</p>
                       <p className="text-xs text-muted-foreground">{r.desc}</p>
                     </div>
-                    <Switch defaultChecked={r.enabled} />
+                    <Switch checked={toggles[`recovery:${r.label}`] ?? r.enabled} onCheckedChange={(v) => setToggle(`recovery:${r.label}`, v)} />
                   </div>
                 ))}
               </CardContent>
@@ -469,7 +528,7 @@ export default function AdminLifeIntelligence() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={e.auto ? 'default' : 'outline'}>{e.auto ? 'Auto' : 'Manual'}</Badge>
-                    <Switch defaultChecked={e.auto} />
+                    <Switch checked={toggles[`event:${e.event}`] ?? e.auto} onCheckedChange={(v) => setToggle(`event:${e.event}`, v)} />
                   </div>
                 </div>
               ))}
@@ -489,7 +548,7 @@ export default function AdminLifeIntelligence() {
               ].map(rule => (
                 <div key={rule} className="flex items-center justify-between p-3 rounded-lg border">
                   <span className="text-sm">{rule}</span>
-                  <Switch defaultChecked />
+                  <Switch checked={toggles[`survival:${rule}`] ?? true} onCheckedChange={(v) => setToggle(`survival:${rule}`, v)} />
                 </div>
               ))}
             </CardContent>

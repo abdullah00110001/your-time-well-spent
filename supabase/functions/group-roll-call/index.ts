@@ -6,14 +6,42 @@ const corsHeaders = {
 };
 
 // Runs daily ~10AM local — computes how many members woke up today per group.
+// SECURITY: this function writes to EVERY rise group (roll-call rows + system
+// chat messages), so it must never be callable by an ordinary user. Access is
+// limited to the scheduler (service-role bearer token) or a platform admin.
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
 
-  const svc = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+  const json = (b: unknown, s = 200) =>
+    new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
+  const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
+  const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+  const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_PUBLISHABLE_KEY')!;
+
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Unauthorized' }, 401);
+  const token = authHeader.slice('Bearer '.length).trim();
+
+  if (token !== SERVICE_KEY) {
+    // Not the scheduler — must be an authenticated platform admin.
+    const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+    });
+    const { data: userData } = await userClient.auth.getUser();
+    if (!userData?.user) return json({ error: 'Unauthorized' }, 401);
+    const { data: isAdmin } = await userClient.rpc('has_role', {
+      _user_id: userData.user.id, _role: 'admin',
+    });
+    if (!isAdmin) return json({ error: 'Forbidden' }, 403);
+  }
+
+  const svc = createClient(SUPABASE_URL, SERVICE_KEY);
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: groups } = await svc.from('lifeos_groups').select('id').eq('is_deleted', false).eq('type', 'rise');
   let processed = 0;
+
 
   for (const g of groups ?? []) {
     const { data: members } = await svc.from('lifeos_group_members').select('user_id').eq('group_id', g.id);

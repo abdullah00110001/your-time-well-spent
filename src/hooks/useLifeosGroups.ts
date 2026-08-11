@@ -1,4 +1,6 @@
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -265,20 +267,22 @@ export function useActivityFeed(groupId: string | undefined) {
       return data ?? [];
     },
   });
-  // realtime
-  if (typeof window !== 'undefined' && groupId) {
-    const channelKey = `feed-${groupId}`;
-    if (!(window as any).__lifeosFeedChannels) (window as any).__lifeosFeedChannels = new Set();
-    if (!(window as any).__lifeosFeedChannels.has(channelKey)) {
-      (window as any).__lifeosFeedChannels.add(channelKey);
-      supabase.channel(channelKey).on('postgres_changes',
+  // realtime — subscribe inside an effect so the channel is always torn down
+  useEffect(() => {
+    if (!groupId) return;
+    const channel = supabase
+      .channel(`feed-${groupId}`)
+      .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'group_activity_feed', filter: `group_id=eq.${groupId}` },
         () => qc.invalidateQueries({ queryKey: ['lifeos-feed', groupId] })
-      ).subscribe();
-    }
-  }
+      )
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [groupId, qc]);
+
   return query;
 }
+
 
 // ====== NUDGE ======
 export function useSendNudge() {

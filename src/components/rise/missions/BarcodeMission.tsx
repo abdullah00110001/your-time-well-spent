@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { scanBarcode, isBarcodeMismatch, isScanCancelled } from '@/lib/capacitor/barcodeScannerBridge';
 import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
@@ -16,22 +16,31 @@ export function BarcodeMission({ onComplete, targetBarcode }: BarcodeMissionProp
   const [errorMsg,  setErrorMsg]    = useState<string>('');
   const [attempts,  setAttempts]    = useState(0);
 
-  // Auto-start scan on mount
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      startScan();
-    }, 500);
-    return () => clearTimeout(timer);
+  // FIX: সব setTimeout ট্র্যাক করা হয় — আনমাউন্টের পরে setState হলে
+  // React warning ও stale state update হতো।
+  const mountedRef = useRef(true);
+  const timersRef  = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  const scanningRef = useRef(false);
+
+  const later = useCallback((fn: () => void, ms: number) => {
+    const t = setTimeout(() => {
+      timersRef.current.delete(t);
+      if (mountedRef.current) fn();
+    }, ms);
+    timersRef.current.add(t);
+    return t;
   }, []);
 
-  const startScan = async () => {
-    if (scanState === 'scanning') return;
+  const startScan = useCallback(async () => {
+    if (scanningRef.current) return;
+    scanningRef.current = true;
 
     setScanState('scanning');
     setErrorMsg('');
 
     try {
       const result = await scanBarcode(targetBarcode);
+      if (!mountedRef.current) return;
 
       if (result.success) {
         // ✅ Success
@@ -40,9 +49,7 @@ export function BarcodeMission({ onComplete, targetBarcode }: BarcodeMissionProp
           await Haptics.notification({ type: NotificationType.Success }).catch(() => {});
         }
         // 800ms delay — user কে success দেখতে দাও
-        setTimeout(() => {
-          onComplete();
-        }, 800);
+        later(() => onComplete(), 800);
 
       } else if (isScanCancelled(result.error)) {
         // User cancel করেছে — idle এ ফিরে যাও
@@ -56,21 +63,38 @@ export function BarcodeMission({ onComplete, targetBarcode }: BarcodeMissionProp
           await Haptics.notification({ type: NotificationType.Error }).catch(() => {});
         }
         // 2s পরে আবার scan করতে দাও
-        setTimeout(() => setScanState('idle'), 2000);
+        later(() => setScanState('idle'), 2000);
 
       } else {
         // Other error
         setScanState('error');
         setErrorMsg(result.error ?? 'Scan failed');
-        setTimeout(() => setScanState('idle'), 2000);
+        later(() => setScanState('idle'), 2000);
       }
 
     } catch (e: any) {
+      if (!mountedRef.current) return;
       setScanState('error');
       setErrorMsg(e?.message ?? 'Unexpected error');
-      setTimeout(() => setScanState('idle'), 2000);
+      later(() => setScanState('idle'), 2000);
+    } finally {
+      scanningRef.current = false;
     }
-  };
+  }, [targetBarcode, onComplete, later]);
+
+  // Auto-start scan on mount + সব timer cleanup
+  useEffect(() => {
+    mountedRef.current = true;
+    const timer = setTimeout(() => { void startScan(); }, 500);
+    return () => {
+      mountedRef.current = false;
+      clearTimeout(timer);
+      timersRef.current.forEach(clearTimeout);
+      timersRef.current.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   // ──────────────────────────────────────────
   // UI States

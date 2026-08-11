@@ -3,11 +3,14 @@
  *
  * Fix 1: Android 13+ permission loop — CameraSource.Photos এর বদলে Camera use করো
  * Fix 2: Reference photo (registeredPhotoUrl) থাকলে side-by-side দেখাও
+ * Fix 3: reference photo থাকলে সত্যিকারের perceptual-hash verification হয় —
+ *        আগে যেকোনো ছবি তুলে "Yes, dismiss" চাপলেই mission bypass হয়ে যেত।
  */
-import { useState, useRef } from 'react';
-import { Camera, RotateCcw, CheckCircle2 } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Camera, RotateCcw, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { isNative } from '@/lib/capacitor/platform';
+import { comparePhotos } from '@/lib/rise/imageHash';
 import { toast } from 'sonner';
 
 interface PhotoMissionProps {
@@ -15,6 +18,8 @@ interface PhotoMissionProps {
   registeredPlace?:      string;
   registeredPhotoUrl?:   string;   // ← reference photo from mission_config.photoDataUrl
 }
+
+type Verdict = 'idle' | 'checking' | 'match' | 'mismatch' | 'unavailable';
 
 export function PhotoMission({
   onComplete,
@@ -24,7 +29,44 @@ export function PhotoMission({
   const [photoUri,    setPhotoUri]    = useState<string | null>(null);
   const [confirming,  setConfirming]  = useState(false);
   const [capturing,   setCapturing]   = useState(false);
+  const [verdict,     setVerdict]     = useState<Verdict>('idle');
+  const [attempts,    setAttempts]    = useState(0);
   const fileRef                        = useRef<HTMLInputElement>(null);
+
+  const mountedRef = useRef(true);
+  const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const acceptPhoto = useCallback(async (dataUrl: string) => {
+    setPhotoUri(dataUrl);
+    setConfirming(true);
+
+    // কোনো reference photo না থাকলে verify করার কিছু নেই — manual confirm।
+    if (!registeredPhotoUrl) {
+      setVerdict('unavailable');
+      return;
+    }
+
+    setVerdict('checking');
+    const check = await comparePhotos(registeredPhotoUrl, dataUrl);
+    if (!mountedRef.current) return;
+
+    if (check.result === 'match') {
+      setVerdict('match');
+    } else if (check.result === 'mismatch') {
+      setVerdict('mismatch');
+      setAttempts((n) => n + 1);
+    } else {
+      // Hashing সম্ভব হয়নি — user কে ringing alarm-এ আটকে রাখা যাবে না।
+      setVerdict('unavailable');
+    }
+  }, [registeredPhotoUrl]);
 
   const takePhoto = async () => {
     if (capturing) return;
@@ -39,10 +81,7 @@ export function PhotoMission({
           allowEditing:  false,
           saveToGallery: false,
         });
-        if (photo.dataUrl) {
-          setPhotoUri(photo.dataUrl);
-          setConfirming(true);
-        }
+        if (photo.dataUrl) await acceptPhoto(photo.dataUrl);
       } else {
         fileRef.current?.click();
       }
@@ -51,7 +90,7 @@ export function PhotoMission({
       if (/cancel|user cancel/i.test(msg)) return; // silent
       toast.error('Camera failed to open');
     } finally {
-      setCapturing(false);
+      if (mountedRef.current) setCapturing(false);
     }
   };
 
@@ -59,18 +98,23 @@ export function PhotoMission({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setPhotoUri(reader.result as string);
-      setConfirming(true);
-    };
+    reader.onload = () => { void acceptPhoto(reader.result as string); };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const confirm = () => {
-    toast.success('Photo verified! Good morning ☀️');
-    setTimeout(() => onComplete(), 400);
+  const retake = () => {
+    setPhotoUri(null);
+    setConfirming(false);
+    setVerdict('idle');
   };
+
+  const confirm = () => {
+    if (verdict === 'checking' || verdict === 'mismatch') return;
+    toast.success('Photo verified! Good morning ☀️');
+    timerRef.current = setTimeout(() => onComplete(), 400);
+  };
+
 
   /* ── Confirmation screen ── */
   if (confirming && photoUri) {
@@ -107,28 +151,59 @@ export function PhotoMission({
             </div>
           )}
 
-          <p className="text-white/60 text-sm text-center max-w-xs">
-            Does this look like <span className="font-semibold text-amber-400">{registeredPlace}</span>?
-          </p>
+          {verdict === 'checking' && (
+            <p className="text-white/60 text-sm text-center flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Comparing with your reference photo…
+            </p>
+          )}
+          {verdict === 'match' && (
+            <p className="text-emerald-400 text-sm text-center font-semibold flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4" /> Matches {registeredPlace}
+            </p>
+          )}
+          {verdict === 'mismatch' && (
+            <p className="text-red-400 text-sm text-center max-w-xs flex flex-col items-center gap-1">
+              <span className="flex items-center gap-2 font-semibold">
+                <XCircle className="h-4 w-4" /> That's not {registeredPlace}
+              </span>
+              <span className="text-white/50">
+                Go to your registered spot and match the reference framing. Attempt {attempts}.
+              </span>
+            </p>
+          )}
+          {verdict === 'unavailable' && (
+            <p className="text-white/60 text-sm text-center max-w-xs">
+              Does this look like <span className="font-semibold text-amber-400">{registeredPlace}</span>?
+            </p>
+          )}
         </div>
 
         <div className="space-y-3 pb-4">
+          {verdict !== 'mismatch' && (
+            <button
+              onClick={confirm}
+              disabled={verdict === 'checking'}
+              className="w-full h-14 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-2xl text-lg font-semibold flex items-center justify-center gap-2"
+            >
+              {verdict === 'checking'
+                ? <><Loader2 className="h-5 w-5 animate-spin" /> Verifying…</>
+                : <><CheckCircle2 className="h-5 w-5" /> Dismiss alarm</>}
+            </button>
+          )}
           <button
-            onClick={confirm}
-            className="w-full h-14 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl text-lg font-semibold flex items-center justify-center gap-2"
-          >
-            <CheckCircle2 className="h-5 w-5" />
-            Yes, dismiss alarm
-          </button>
-          <button
-            onClick={() => { setPhotoUri(null); setConfirming(false); }}
-            className="w-full h-12 text-white/60 flex items-center justify-center gap-2"
+            onClick={retake}
+            className={
+              verdict === 'mismatch'
+                ? 'w-full h-14 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-lg font-semibold flex items-center justify-center gap-2'
+                : 'w-full h-12 text-white/60 flex items-center justify-center gap-2'
+            }
           >
             <RotateCcw className="h-4 w-4" />
-            Retake
+            Retake photo
           </button>
         </div>
       </div>
+
     );
   }
 
