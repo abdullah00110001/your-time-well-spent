@@ -3,11 +3,14 @@
  *
  * Fix 1: Android 13+ permission loop — CameraSource.Photos এর বদলে Camera use করো
  * Fix 2: Reference photo (registeredPhotoUrl) থাকলে side-by-side দেখাও
+ * Fix 3: reference photo থাকলে সত্যিকারের perceptual-hash verification হয় —
+ *        আগে যেকোনো ছবি তুলে "Yes, dismiss" চাপলেই mission bypass হয়ে যেত।
  */
-import { useState, useRef } from 'react';
-import { Camera, RotateCcw, CheckCircle2 } from 'lucide-react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { Camera, RotateCcw, CheckCircle2, Loader2, XCircle } from 'lucide-react';
 import { Camera as CapCamera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { isNative } from '@/lib/capacitor/platform';
+import { comparePhotos } from '@/lib/rise/imageHash';
 import { toast } from 'sonner';
 
 interface PhotoMissionProps {
@@ -15,6 +18,8 @@ interface PhotoMissionProps {
   registeredPlace?:      string;
   registeredPhotoUrl?:   string;   // ← reference photo from mission_config.photoDataUrl
 }
+
+type Verdict = 'idle' | 'checking' | 'match' | 'mismatch' | 'unavailable';
 
 export function PhotoMission({
   onComplete,
@@ -24,7 +29,44 @@ export function PhotoMission({
   const [photoUri,    setPhotoUri]    = useState<string | null>(null);
   const [confirming,  setConfirming]  = useState(false);
   const [capturing,   setCapturing]   = useState(false);
+  const [verdict,     setVerdict]     = useState<Verdict>('idle');
+  const [attempts,    setAttempts]    = useState(0);
   const fileRef                        = useRef<HTMLInputElement>(null);
+
+  const mountedRef = useRef(true);
+  const timerRef   = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+
+  const acceptPhoto = useCallback(async (dataUrl: string) => {
+    setPhotoUri(dataUrl);
+    setConfirming(true);
+
+    // কোনো reference photo না থাকলে verify করার কিছু নেই — manual confirm।
+    if (!registeredPhotoUrl) {
+      setVerdict('unavailable');
+      return;
+    }
+
+    setVerdict('checking');
+    const check = await comparePhotos(registeredPhotoUrl, dataUrl);
+    if (!mountedRef.current) return;
+
+    if (check.result === 'match') {
+      setVerdict('match');
+    } else if (check.result === 'mismatch') {
+      setVerdict('mismatch');
+      setAttempts((n) => n + 1);
+    } else {
+      // Hashing সম্ভব হয়নি — user কে ringing alarm-এ আটকে রাখা যাবে না।
+      setVerdict('unavailable');
+    }
+  }, [registeredPhotoUrl]);
 
   const takePhoto = async () => {
     if (capturing) return;
@@ -39,10 +81,7 @@ export function PhotoMission({
           allowEditing:  false,
           saveToGallery: false,
         });
-        if (photo.dataUrl) {
-          setPhotoUri(photo.dataUrl);
-          setConfirming(true);
-        }
+        if (photo.dataUrl) await acceptPhoto(photo.dataUrl);
       } else {
         fileRef.current?.click();
       }
@@ -51,7 +90,7 @@ export function PhotoMission({
       if (/cancel|user cancel/i.test(msg)) return; // silent
       toast.error('Camera failed to open');
     } finally {
-      setCapturing(false);
+      if (mountedRef.current) setCapturing(false);
     }
   };
 
@@ -59,18 +98,23 @@ export function PhotoMission({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      setPhotoUri(reader.result as string);
-      setConfirming(true);
-    };
+    reader.onload = () => { void acceptPhoto(reader.result as string); };
     reader.readAsDataURL(file);
     e.target.value = '';
   };
 
-  const confirm = () => {
-    toast.success('Photo verified! Good morning ☀️');
-    setTimeout(() => onComplete(), 400);
+  const retake = () => {
+    setPhotoUri(null);
+    setConfirming(false);
+    setVerdict('idle');
   };
+
+  const confirm = () => {
+    if (verdict === 'checking' || verdict === 'mismatch') return;
+    toast.success('Photo verified! Good morning ☀️');
+    timerRef.current = setTimeout(() => onComplete(), 400);
+  };
+
 
   /* ── Confirmation screen ── */
   if (confirming && photoUri) {
