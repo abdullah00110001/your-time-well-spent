@@ -151,28 +151,59 @@ export function PhotoMission({
             </div>
           )}
 
-          <p className="text-white/60 text-sm text-center max-w-xs">
-            Does this look like <span className="font-semibold text-amber-400">{registeredPlace}</span>?
-          </p>
+          {verdict === 'checking' && (
+            <p className="text-white/60 text-sm text-center flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Comparing with your reference photo…
+            </p>
+          )}
+          {verdict === 'match' && (
+            <p className="text-emerald-400 text-sm text-center font-semibold flex items-center gap-2">
+              <CheckCircle2 className="h-4 w-4" /> Matches {registeredPlace}
+            </p>
+          )}
+          {verdict === 'mismatch' && (
+            <p className="text-red-400 text-sm text-center max-w-xs flex flex-col items-center gap-1">
+              <span className="flex items-center gap-2 font-semibold">
+                <XCircle className="h-4 w-4" /> That's not {registeredPlace}
+              </span>
+              <span className="text-white/50">
+                Go to your registered spot and match the reference framing. Attempt {attempts}.
+              </span>
+            </p>
+          )}
+          {verdict === 'unavailable' && (
+            <p className="text-white/60 text-sm text-center max-w-xs">
+              Does this look like <span className="font-semibold text-amber-400">{registeredPlace}</span>?
+            </p>
+          )}
         </div>
 
         <div className="space-y-3 pb-4">
+          {verdict !== 'mismatch' && (
+            <button
+              onClick={confirm}
+              disabled={verdict === 'checking'}
+              className="w-full h-14 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-40 text-white rounded-2xl text-lg font-semibold flex items-center justify-center gap-2"
+            >
+              {verdict === 'checking'
+                ? <><Loader2 className="h-5 w-5 animate-spin" /> Verifying…</>
+                : <><CheckCircle2 className="h-5 w-5" /> Dismiss alarm</>}
+            </button>
+          )}
           <button
-            onClick={confirm}
-            className="w-full h-14 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl text-lg font-semibold flex items-center justify-center gap-2"
-          >
-            <CheckCircle2 className="h-5 w-5" />
-            Yes, dismiss alarm
-          </button>
-          <button
-            onClick={() => { setPhotoUri(null); setConfirming(false); }}
-            className="w-full h-12 text-white/60 flex items-center justify-center gap-2"
+            onClick={retake}
+            className={
+              verdict === 'mismatch'
+                ? 'w-full h-14 bg-amber-500 hover:bg-amber-600 text-white rounded-2xl text-lg font-semibold flex items-center justify-center gap-2'
+                : 'w-full h-12 text-white/60 flex items-center justify-center gap-2'
+            }
           >
             <RotateCcw className="h-4 w-4" />
-            Retake
+            Retake photo
           </button>
         </div>
       </div>
+
     );
   }
 
