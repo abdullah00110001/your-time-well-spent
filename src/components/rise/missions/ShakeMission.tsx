@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Activity, Smartphone, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 // সেন্সরের জন্য ক্যাপাসিটর মোশন প্লাগিন
 import { Motion } from '@capacitor/motion';
+import type { PluginListenerHandle } from '@capacitor/core';
 import { isNative } from '@/lib/capacitor/platform';
+
 
 interface ShakeMissionProps {
   onComplete: () => void;
@@ -14,12 +16,34 @@ interface ShakeMissionProps {
 export function ShakeMission({ onComplete, requiredShakes = 30 }: ShakeMissionProps) {
   const [shakeCount, setShakeCount] = useState(0);
   const [isFinished, setIsFinished] = useState(false);
-  
+
   // ডাবল কাউন্ট রোধ করার জন্য টাইম ট্র্যাকার
   const lastShakeTime = useRef<number>(0);
+  // FIX: isFinished-কে ref-এ রাখা হলো — না হলে effect প্রতি state change-এ
+  // re-run করে listener remove/add churn তৈরি করত।
+  const finishedRef = useRef(false);
+  const completeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  const handleComplete = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    setIsFinished(true);
+    toast.success("Wake up successful!");
+    completeTimer.current = setTimeout(() => {
+      onCompleteRef.current();
+    }, 500);
+  }, []);
+
+  const handleCompleteRef = useRef(handleComplete);
+  handleCompleteRef.current = handleComplete;
 
   useEffect(() => {
     let isMounted = true;
+    // FIX: শুধু নিজের handle remove করা হয় — removeAllListeners() পুরো অ্যাপের
+    // Motion listener মুছে দিত।
+    let handle: PluginListenerHandle | null = null;
 
     const setupMotionListener = async () => {
       if (!isNative) {
@@ -29,54 +53,50 @@ export function ShakeMission({ onComplete, requiredShakes = 30 }: ShakeMissionPr
 
       try {
         // মোশন লিসেনার অ্যাড করা
-        await Motion.addListener('accel', (event) => {
-          if (!isMounted || isFinished) return;
+        const h = await Motion.addListener('accel', (event) => {
+          if (!isMounted || finishedRef.current) return;
 
           // X, Y, Z অক্ষের এক্সিলারেশন মাপা
           const { x, y, z } = event.acceleration;
-          
-          // ভেক্টর ম্যাগনিটিউড বের করা (কত জোরে ঝাঁকানো হয়েছে)
+
+          // ভেক্টর ম্যাগনিটিউড বের করা (কত জোরে ঝাঁকানো হয়েছে)
           const acceleration = Math.sqrt(x * x + y * y + z * z);
-          
+
           // থ্রেশোল্ড (Threshold): ১৫ এর বেশি হলে সেটাকে 'জোরে ঝাঁকানো' ধরা হবে
           if (acceleration > 15) {
             const now = Date.now();
             // এক ঝাঁকুনির পর অন্তত ৩০০ মিলি-সেকেন্ড গ্যাপ থাকতে হবে
             if (now - lastShakeTime.current > 300) {
               lastShakeTime.current = now;
-              
+
               setShakeCount((prev) => {
                 const newCount = prev + 1;
                 if (newCount >= requiredShakes) {
-                  handleComplete();
+                  handleCompleteRef.current();
                 }
                 return newCount;
               });
             }
           }
         });
+        if (!isMounted) { void h.remove(); return; }
+        handle = h;
       } catch (error) {
         console.error("Failed to start motion listener:", error);
         toast.error("Motion sensor not available!");
       }
     };
 
-    setupMotionListener();
+    void setupMotionListener();
 
-    // কম্পোনেন্ট আনমাউন্ট হলে লিসেনার মুছে ফেলা (যাতে ব্যাটারি নষ্ট না হয়)
+    // কম্পোনেন্ট আনমাউন্ট হলে লিসেনার মুছে ফেলা (যাতে ব্যাটারি নষ্ট না হয়)
     return () => {
       isMounted = false;
-      Motion.removeAllListeners();
+      if (completeTimer.current) clearTimeout(completeTimer.current);
+      void handle?.remove();
     };
-  }, [isFinished, requiredShakes]);
+  }, [requiredShakes]);
 
-  const handleComplete = () => {
-    setIsFinished(true);
-    toast.success("Wake up successful!");
-    setTimeout(() => {
-      onComplete();
-    }, 500);
-  };
 
   // ব্রাউজারে টেস্ট করার জন্য বা সেন্সর নষ্ট থাকলে ব্যাকআপ বাটন
   const simulateShake = () => {
