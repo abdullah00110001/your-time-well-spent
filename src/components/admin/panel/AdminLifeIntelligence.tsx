@@ -223,7 +223,7 @@ export default function AdminLifeIntelligence() {
                     <Switch checked={toggle.checked} onCheckedChange={toggle.onChange} />
                   </div>
                 ))}
-                <Button onClick={saveLoadSettings} className="w-full">Save Load Settings</Button>
+                <Button onClick={saveLoadSettings} disabled={saving} className="w-full">{saving ? 'Saving…' : 'Save Load Settings'}</Button>
               </CardContent>
             </Card>
           </div>
@@ -321,7 +321,7 @@ export default function AdminLifeIntelligence() {
                       <p className="text-sm font-medium">{r.label}</p>
                       <p className="text-xs text-muted-foreground">{r.desc}</p>
                     </div>
-                    <Switch defaultChecked={r.enabled} />
+                    <Switch checked={toggles[`recovery:${r.label}`] ?? r.enabled} onCheckedChange={(v) => setToggle(`recovery:${r.label}`, v)} />
                   </div>
                 ))}
               </CardContent>
@@ -528,7 +528,7 @@ export default function AdminLifeIntelligence() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={e.auto ? 'default' : 'outline'}>{e.auto ? 'Auto' : 'Manual'}</Badge>
-                    <Switch defaultChecked={e.auto} />
+                    <Switch checked={toggles[`event:${e.event}`] ?? e.auto} onCheckedChange={(v) => setToggle(`event:${e.event}`, v)} />
                   </div>
                 </div>
               ))}
@@ -548,7 +548,7 @@ export default function AdminLifeIntelligence() {
               ].map(rule => (
                 <div key={rule} className="flex items-center justify-between p-3 rounded-lg border">
                   <span className="text-sm">{rule}</span>
-                  <Switch defaultChecked />
+                  <Switch checked={toggles[`survival:${rule}`] ?? true} onCheckedChange={(v) => setToggle(`survival:${rule}`, v)} />
                 </div>
               ))}
             </CardContent>
