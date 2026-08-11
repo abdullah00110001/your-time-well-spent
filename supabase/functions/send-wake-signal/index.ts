@@ -96,18 +96,49 @@ async function sendFcm(deviceToken: string, payload: {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  const json = (b: unknown, s = 200) =>
+    new Response(JSON.stringify(b), { status: s, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+
   try {
-    const { target_user_id, sender_user_id, group_id, signal_type } = await req.json();
-    if (!target_user_id || !sender_user_id) {
-      return new Response(JSON.stringify({ error: 'Missing required fields' }), {
-        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
+    const body = await req.json().catch(() => ({}));
+    const { target_user_id, group_id, signal_type } = body ?? {};
+    if (!target_user_id) return json({ error: 'Missing required fields' }, 400);
+
+    // SECURITY: the sender is derived from the caller's JWT — never from the
+    // request body. Previously any authenticated user could impersonate any
+    // sender and push a fake wake-up to any user in the project.
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader?.startsWith('Bearer ')) return json({ error: 'Unauthorized' }, 401);
+    const token = authHeader.slice('Bearer '.length).trim();
+    const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY') ?? Deno.env.get('SUPABASE_PUBLISHABLE_KEY')!;
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    let sender_user_id: string;
+
+    if (token === SUPABASE_SERVICE_ROLE_KEY) {
+      // Trusted server-to-server call (e.g. group-wake-followup fan-out).
+      sender_user_id = body?.sender_user_id;
+      if (!sender_user_id) return json({ error: 'Missing required fields' }, 400);
+    } else {
+      const userClient = createClient(SUPABASE_URL, ANON_KEY, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const { data: userData } = await userClient.auth.getUser();
+      if (!userData?.user) return json({ error: 'Unauthorized' }, 401);
+      sender_user_id = userData.user.id;
+      if (sender_user_id === target_user_id) return json({ error: 'Cannot wake yourself' }, 400);
+
+      // Only people who share a group with the target may wake them.
+      const { data: shares } = await userClient.rpc('share_lifeos_group', {
+        _a: sender_user_id, _b: target_user_id,
+      });
+      if (!shares) return json({ error: 'Not in a shared group with this user' }, 403);
+    }
+
     const { data: senderProfile } = await supabase
       .from('profiles').select('full_name').eq('user_id', sender_user_id).maybeSingle();
     const senderName = senderProfile?.full_name || 'Someone';
+
 
     const messages: Record<string, { title: string; body: string; priority: string }> = {
       gentle: { title: `${senderName} is waking you up! 🔔`, body: 'Rise and shine! Someone wants you awake.', priority: 'high' },
