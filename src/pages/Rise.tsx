@@ -10,6 +10,8 @@ import { RiseBottomNav } from '@/components/rise/RiseBottomNav';
 import { RiseHeader } from '@/components/rise/RiseHeader';
 import { RiseAlarmCard } from '@/components/rise/RiseAlarmCard';
 import { NextAlarmRing } from '@/components/rise/NextAlarmRing';
+import { AscentRail, AscentNode } from '@/components/rise/ascent/AscentRail';
+import { ThermalDrift } from '@/components/rise/ascent/ThermalDrift';
 import { missionLabel } from '@/lib/rise/missionLabel';
 import { RiseAlarmEditor } from '@/components/rise/RiseAlarmEditor';
 import { RiseReports } from '@/components/rise/RiseReports';
@@ -78,6 +80,8 @@ export default function RisePage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingAlarm, setEditingAlarm] = useState<RiseAlarm | null>(null);
   const [backFlash, setBackFlash] = useState(false);
+  const [railSweep, setRailSweep] = useState(false);
+
 
   // � Permission State
   const [permissions, setPermissions] = useState<RisePermissionStatus>({
@@ -312,6 +316,14 @@ export default function RisePage() {
     setEditorOpen(true);
   };
 
+  // Commit press: send a light up the meridian, then open the editor.
+  const handleCommit = () => {
+    setRailSweep(true);
+    window.setTimeout(() => setRailSweep(false), 620);
+    window.setTimeout(() => handleCreateAlarm(), 220);
+  };
+
+
   const handleSaveAlarm = async (data: any) => {
     loadRiseData();
   };
@@ -457,49 +469,64 @@ export default function RisePage() {
 
         <div className="px-4 mt-4">
           {activeTab === 'alarms' && (
-            <div className="space-y-4">
-              {/* Hero: next-alarm ring */}
-              <NextAlarmRing
-                time={nextAlarm?.time ?? null}
-                countdown={nextAlarm?.countdown ?? null}
-                progress={nextAlarm?.progress ?? 0}
-                intention={nextAlarm?.alarm?.intention ?? null}
-                missionLabel={nextAlarm ? missionLabel(nextAlarm.alarm) : null}
-              />
+            <div className="rise-os relative">
+              <ThermalDrift className="h-[280px]" />
 
-              {/* Alarm list */}
-              {alarms.length === 0 ? (
-                <Card className="border-dashed">
-                  <CardContent className="py-10 text-center">
-                    <Sunrise className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40" />
-                    <h3 className="font-semibold mb-3">What will tomorrow's you thank you for?</h3>
-                    <Button onClick={handleCreateAlarm}>Set tonight's intention</Button>
-                  </CardContent>
-                </Card>
-              ) : (
-                <div className="space-y-3">
-                  {alarms.map((alarm) => (
-                    <RiseAlarmCard
+              <AscentRail sweep={railSweep} className="relative">
+                {/* Hero node: the next alarm */}
+                <AscentNode index={0} active={!!nextAlarm}>
+                  <NextAlarmRing
+                    time={nextAlarm?.time ?? null}
+                    countdown={nextAlarm?.countdown ?? null}
+                    progress={nextAlarm?.progress ?? 0}
+                    intention={nextAlarm?.alarm?.intention ?? null}
+                    missionLabel={nextAlarm ? missionLabel(nextAlarm.alarm) : null}
+                  />
+                </AscentNode>
+
+                {alarms.length === 0 ? (
+                  <AscentNode index={1}>
+                    <Card className="border-dashed">
+                      <CardContent className="py-10 text-center">
+                        <Sunrise className="h-12 w-12 mx-auto mb-3 text-muted-foreground/40" />
+                        <h3 className="font-semibold mb-3">What will tomorrow's you thank you for?</h3>
+                        <Button onClick={handleCreateAlarm}>Set tonight's intention</Button>
+                      </CardContent>
+                    </Card>
+                  </AscentNode>
+                ) : (
+                  alarms.map((alarm, i) => (
+                    <AscentNode
                       key={alarm.id}
-                      alarm={alarm}
-                      onToggle={toggleAlarm}
-                      onEdit={handleEditAlarm}
-                      onDelete={handleDeleteAlarm}
-                      onDuplicate={handleDuplicateAlarm}
-                    />
-                  ))}
-                </div>
-              )}
+                      index={i + 1}
+                      active={alarm.id === nextAlarm?.alarm?.id}
+                      onSwipeUp={!alarm.is_enabled ? () => toggleAlarm(alarm.id, true) : undefined}
+                      onSwipeDown={alarm.is_enabled ? () => toggleAlarm(alarm.id, false) : undefined}
+                    >
+                      <RiseAlarmCard
+                        alarm={alarm}
+                        onToggle={toggleAlarm}
+                        onEdit={handleEditAlarm}
+                        onDelete={handleDeleteAlarm}
+                        onDuplicate={handleDuplicateAlarm}
+                      />
+                    </AscentNode>
+                  ))
+                )}
+              </AscentRail>
 
-              {/* Commit CTA */}
+              {/* horizon: everything above is committed, below is still night */}
+              <div className="rise-horizon mt-5" />
+
               <Button
-                onClick={handleCreateAlarm}
-                className="w-full h-12 rounded-full text-base font-semibold"
+                onClick={handleCommit}
+                className="mt-4 w-full h-12 rounded-full text-base font-semibold"
               >
                 Commit to tomorrow
               </Button>
             </div>
           )}
+
           {activeTab === 'group' && <LifeosGroupsHome defaultType="rise" />}
           {activeTab === 'community' && <CommunityWakeFeed />}
           {activeTab === 'reports' && <RiseReports />}

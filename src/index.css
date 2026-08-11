@@ -651,3 +651,113 @@ input, textarea, [contenteditable="true"] {
 @media (prefers-reduced-motion: reduce) {
   .lantern-breathe { animation: none; transition: none; }
 }
+
+/* ==========================================================================
+   RISE — "The Ascent Column". Scoped geometry + motion only; every colour
+   still comes from the global semantic tokens, so themes stay consistent.
+   ========================================================================== */
+.rise-os { position: relative; }
+
+/* the meridian: dim at the bottom (night), bright at the top (day) */
+.rise-rail {
+  background: linear-gradient(
+    to top,
+    hsl(var(--border)) 0%,
+    hsl(var(--primary) / 0.35) 55%,
+    hsl(var(--primary) / 0.9) 100%
+  );
+}
+
+@keyframes rise-sweep {
+  from { transform: translateY(100%); opacity: 0; }
+  25%  { opacity: 1; }
+  to   { transform: translateY(-100%); opacity: 0; }
+}
+.rise-rail-sweep {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 0;
+  height: 45%;
+  background: linear-gradient(to top, transparent, hsl(var(--primary)), transparent);
+  animation: rise-sweep 0.6s ease-out forwards;
+}
+
+@keyframes rise-node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.45); }
+  70%      { box-shadow: 0 0 0 7px hsl(var(--primary) / 0); }
+}
+.rise-node-live { animation: rise-node-pulse 2.6s ease-out infinite; }
+
+@keyframes rise-mote-drift {
+  0%   { transform: translateY(0) translateX(0); opacity: 0; }
+  15%  { opacity: 0.5; }
+  85%  { opacity: 0.3; }
+  100% { transform: translateY(-190px) translateX(12px); opacity: 0; }
+}
+.rise-mote {
+  position: absolute;
+  bottom: 0;
+  border-radius: 9999px;
+  background: hsl(var(--primary) / 0.5);
+  will-change: transform, opacity;
+  animation-name: rise-mote-drift;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+.rise-horizon {
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    hsl(var(--border)) 20%,
+    hsl(var(--border)) 80%,
+    transparent
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise-mote, .rise-node-live, .rise-rail-sweep { animation: none; }
+  .rise-mote { display: none; }
+}
+
+/* ==========================================================================
+   SHIELD — "The Aegis Lattice". Rectilinear armour plates against Rise's
+   flowing rail. Same tokens, opposite geometry.
+   ========================================================================== */
+.shield-os { position: relative; }
+
+.shield-plate {
+  position: relative;
+  border-radius: calc(var(--radius) - 0.35rem);
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card) / 0.92);
+  color: hsl(var(--card-foreground));
+  backdrop-filter: blur(10px);
+  box-shadow: inset 0 1px 0 0 hsl(var(--foreground) / 0.05);
+}
+
+@keyframes shield-scan {
+  from { transform: translateY(-120%); opacity: 0; }
+  20%  { opacity: 1; }
+  to   { transform: translateY(120%); opacity: 0; }
+}
+.shield-scanline {
+  pointer-events: none;
+  position: absolute;
+  left: 6%;
+  right: 6%;
+  height: 2px;
+  background: linear-gradient(to right, transparent, hsl(var(--primary)), transparent);
+  animation: shield-scan 0.7s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes shield-ripple {
+  0%   { transform: scale(1); opacity: 0.5; }
+  100% { transform: scale(1.14); opacity: 0; }
+}
+.shield-ripple { animation: shield-ripple 0.6s ease-out forwards; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shield-scanline, .shield-ripple { animation: none; display: none; }
+}

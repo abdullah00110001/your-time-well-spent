@@ -52,6 +52,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useScreenTime } from '@/hooks/useScreenTime';
+import { AegisRings, AegisLegend, LatticePanel, type AegisArc } from './AegisRings';
 
 /* ------------------------------------------------------------------ utils */
 
@@ -218,14 +219,27 @@ function Panel({
 
 /* ------------------------------------------------------------ HOME SCREEN */
 
+const readList = (key: string): any[] => {
+  try {
+    const v = JSON.parse(localStorage.getItem(key) || '[]');
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+};
+
 function HomeScreen({
   streak,
   score,
+  mode,
+  onStrict,
   onOpenModes,
   onOpenReports,
 }: {
   streak: number;
   score: number;
+  mode: LanternMode;
+  onStrict: (on: boolean) => void;
   onOpenModes: () => void;
   onOpenReports: () => void;
 }) {
@@ -251,27 +265,56 @@ function HomeScreen({
   );
   const max = top[0]?.usageMinutes || 1;
 
+  // Which layers of armour are currently up.
+  const arcs: AegisArc[] = useMemo(
+    () => [
+      { id: 'sites', label: 'Sites', active: readList('shield_blocked_sites_v2').some((s: any) => s?.active), ring: 0, onClick: onOpenModes },
+      { id: 'keywords', label: 'Keywords', active: readList('shield_blocked_keywords_v2').length > 0, ring: 0, onClick: onOpenModes },
+      { id: 'adult', label: 'Adult filter', active: localStorage.getItem('shield_adult_block') === '1', ring: 0, onClick: onOpenModes },
+      { id: 'apps', label: 'App locks', active: readList('shield_blocked_apps_v2').length > 0, ring: 1, onClick: onOpenModes },
+      { id: 'reels', label: 'Infinite feeds', active: localStorage.getItem('shield_reels_block') === '1', ring: 1, onClick: onOpenModes },
+      { id: 'watch', label: 'Watch', active: mode !== 'normal', ring: 2, onClick: onOpenModes },
+    ],
+    [mode, onOpenModes],
+  );
+
+  const raised = arcs.filter((a) => a.active).length;
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Morning' : hour < 17 ? 'Afternoon' : 'Evening';
 
   return (
-    <div className="space-y-4">
+    <div className="shield-os space-y-3">
       <div className="pt-1">
-        <p className="lantern-label">{greeting} · keeper</p>
+        <p className="lantern-label">{greeting} · perimeter</p>
         <h1 className="text-xl font-bold text-foreground">
-          {level > 0.6 ? 'The flame is steady.' : level > 0.25 ? 'Burning a little fast.' : 'Running low on oil.'}
+          {raised === 0
+            ? 'The field is down.'
+            : raised >= 4
+            ? 'The field is holding.'
+            : 'Partial cover.'}
         </h1>
       </div>
 
-      <Panel className="pt-6">
+      <LatticePanel index={0} className="pt-6">
         {isLoading ? (
-          <div className="grid h-[236px] place-items-center">
+          <div className="grid h-[248px] place-items-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <Reservoir level={level} usedMinutes={totalScreenTimeMinutes} budgetMinutes={budget} />
+          <AegisRings
+            arcs={arcs}
+            sealed={mode === 'strict'}
+            centerLabel={mode === 'strict' ? 'sealed' : 'layers up'}
+            centerValue={`${raised}`}
+            centerUnit={`/${arcs.length}`}
+            onPanic={() => onStrict(true)}
+          />
         )}
-        <div className="mt-5 grid grid-cols-3 divide-x divide-border border-t border-border pt-4">
+        <AegisLegend arcs={arcs} />
+        <p className="mt-3 text-center text-[11px] text-muted-foreground">
+          Tap a segment to adjust it · drag the core outward to seal everything
+        </p>
+        <div className="mt-4 grid grid-cols-3 divide-x divide-border border-t border-border pt-4">
           {[
             { k: 'Streak', v: `${streak}`, u: 'd' },
             { k: 'Keep score', v: `${score}`, u: '' },
@@ -286,41 +329,51 @@ function HomeScreen({
             </div>
           ))}
         </div>
-      </Panel>
+      </LatticePanel>
 
-      <Panel title="Where the oil went" hint={fmt(totalScreenTimeMinutes)}>
-        <BurnLine segments={segments} />
-      </Panel>
+      <div className="grid grid-cols-1 gap-3">
+        <LatticePanel index={1}>
+          <div className="mb-3 flex items-baseline justify-between gap-3">
+            <h2 className="lantern-label !mb-0">Where the oil went</h2>
+            <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+              {fmt(totalScreenTimeMinutes)}
+            </span>
+          </div>
+          <BurnLine segments={segments} />
+        </LatticePanel>
 
-      <Panel title="Brightest wicks">
-        <div className="divide-y divide-border">
-          {top.map((a, i) => (
-            <WickRow key={a.packageName} name={a.appName} minutes={a.usageMinutes} max={max} rank={i + 1} />
-          ))}
-        </div>
-        <button
-          onClick={onOpenReports}
-          className="mt-3 flex w-full items-center justify-between rounded-xl bg-muted/60 px-3 py-2.5 text-sm font-semibold text-foreground"
-        >
-          See the full ledger
-          <ChevronRight className="h-4 w-4 text-muted-foreground" />
-        </button>
-      </Panel>
+        <LatticePanel index={2}>
+          <h2 className="lantern-label">Brightest wicks</h2>
+          <div className="divide-y divide-border">
+            {top.map((a, i) => (
+              <WickRow key={a.packageName} name={a.appName} minutes={a.usageMinutes} max={max} rank={i + 1} />
+            ))}
+          </div>
+          <button
+            onClick={onOpenReports}
+            className="mt-3 flex w-full items-center justify-between rounded-lg bg-muted/60 px-3 py-2.5 text-sm font-semibold text-foreground"
+          >
+            See the full ledger
+            <ChevronRight className="h-4 w-4 text-muted-foreground" />
+          </button>
+        </LatticePanel>
+      </div>
 
       <button
         onClick={onOpenModes}
-        className="flex w-full items-center gap-3 rounded-2xl border border-primary/30 bg-primary/10 px-4 py-4 text-left transition-transform active:scale-[0.99]"
+        className="shield-plate flex w-full items-center gap-3 px-4 py-4 text-left transition-transform active:scale-[0.99]"
       >
-        <Flame className="lantern-breathe h-5 w-5 shrink-0 text-primary" />
+        <ShieldCheck className="h-5 w-5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-bold text-foreground">Tend the lantern</p>
-          <p className="text-xs text-muted-foreground">Start a Focus, Sleep or Strict watch</p>
+          <p className="text-sm font-bold text-foreground">Raise another layer</p>
+          <p className="text-xs text-muted-foreground">Focus, Sleep or a sealed watch</p>
         </div>
         <ChevronRight className="h-4 w-4 text-muted-foreground" />
       </button>
     </div>
   );
 }
+
 
 /* ----------------------------------------------------------- MODES SCREEN */
 
@@ -711,7 +764,7 @@ export function FocusShieldUI({
   settingsSlot,
 }: FocusShieldUIProps) {
   return (
-    <div className="lantern min-h-screen bg-background pb-28">
+    <div className="lantern shield-os min-h-screen bg-background pb-28">
       <header className="sticky top-0 z-40 border-b border-border bg-background/85 px-4 pb-3 pt-[max(env(safe-area-inset-top),0.75rem)] backdrop-blur-xl">
         <div className="flex items-center gap-3">
           {onBack && (
@@ -719,13 +772,14 @@ export function FocusShieldUI({
               <ArrowLeft className="h-4 w-4 text-muted-foreground" />
             </button>
           )}
-          <div className="lantern-halo grid h-9 w-9 place-items-center rounded-2xl">
-            <Flame className="lantern-breathe h-4 w-4 text-primary" />
+          <div className="grid h-9 w-9 place-items-center rounded-lg border border-primary/40 bg-primary/10">
+            <ShieldCheck className="h-4 w-4 text-primary" />
           </div>
           <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-bold text-foreground">Focus Shield</h1>
-            <p className="lantern-label !mb-0">keeper of the lantern</p>
+            <p className="lantern-label !mb-0">containment field</p>
           </div>
+
           <div className="flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5">
             <ShieldCheck className={cn('h-3.5 w-3.5', mode === 'normal' ? 'text-muted-foreground' : 'text-primary')} />
             <span className="font-mono text-[11px] font-bold uppercase tabular-nums text-foreground">
@@ -740,6 +794,8 @@ export function FocusShieldUI({
           <HomeScreen
             streak={streak}
             score={score}
+            mode={mode}
+            onStrict={onToggleStrict}
             onOpenModes={() => onTabChange('modes')}
             onOpenReports={() => onTabChange('reports')}
           />
