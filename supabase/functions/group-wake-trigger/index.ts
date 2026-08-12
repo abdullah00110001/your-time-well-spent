@@ -56,16 +56,16 @@ Deno.serve(async (req) => {
       .order('created_at', { ascending: false }).limit(1).maybeSingle();
     const wakeTime = (alarmRow?.wake_time as string | undefined)?.slice(0, 5) ?? '';
 
-    // System chat message (idempotent: check for today's trigger message)
-    const { data: existingMsg } = await svc
-      .from('group_chat_messages')
+    // Claim today's session atomically. The unique (group_id, alarm_date) constraint
+    // means only the first concurrent caller inserts a row — everyone else gets a
+    // conflict and skips posting a duplicate system message.
+    const { data: claimed } = await svc
+      .from('group_wake_sessions')
+      .insert({ group_id, alarm_date: today, triggered_by: userData.user.id, wake_time: wakeTime })
       .select('id')
-      .eq('group_id', group_id)
-      .eq('is_system', true)
-      .gte('created_at', `${today}T00:00:00Z`)
-      .ilike('content', '⏰ Morning Crew alarm fired%')
       .maybeSingle();
-    if (!existingMsg) {
+
+    if (claimed) {
       await svc.from('group_chat_messages').insert({
         group_id, user_id: userData.user.id, is_system: true,
         content: `⏰ Morning Crew alarm fired — ${wakeTime}`,
