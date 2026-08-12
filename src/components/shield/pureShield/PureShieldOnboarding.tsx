@@ -16,15 +16,26 @@ interface Props {
   open: boolean;
   /** `dontShowAgain` is true when the user ticked the checkbox. */
   onFinish: (dontShowAgain: boolean) => void;
+  /** Real installed apps from the native bridge. */
+  installedApps?: { packageName: string; appName: string }[];
+  /** Packages PureShield is currently targeting. */
+  targetApps?: string[];
+  /** Persists the selection natively. */
+  onToggleApp?: (pkg: string) => void | Promise<void>;
 }
 
-/** Illustrative app list shown in step 2 (real selection happens in the Apps tab). */
-const SAMPLE_APPS = ['Instagram', 'YouTube', 'Facebook', 'TikTok', 'Chrome'];
-
-export function PureShieldOnboarding({ open, onFinish }: Props) {
+export function PureShieldOnboarding({
+  open,
+  onFinish,
+  installedApps = [],
+  targetApps = [],
+  onToggleApp,
+}: Props) {
   const [step, setStep] = useState(0);
   const [dontShow, setDontShow] = useState(false);
-  const [checked, setChecked] = useState<string[]>(['Instagram', 'YouTube']);
+
+  // Only the first few apps — the full picker lives in the Apps tab.
+  const appList = installedApps.slice(0, 6);
 
   const steps = [
     {
@@ -37,15 +48,20 @@ export function PureShieldOnboarding({ open, onFinish }: Props) {
       icon: ListChecks,
       title: 'Select Apps First',
       text: 'Choose which apps PureShield will run on.',
-      body: (
+      body: appList.length === 0 ? (
+        <div className="rounded-xl border border-border/60 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+          No installed apps detected yet. Open the <span className="font-medium text-foreground">Apps</span> tab
+          after this setup to pick the apps PureShield should watch.
+        </div>
+      ) : (
         <div className="space-y-2">
-          {SAMPLE_APPS.map((app) => {
-            const on = checked.includes(app);
+          {appList.map((app) => {
+            const on = targetApps.includes(app.packageName);
             return (
               <button
-                key={app}
+                key={app.packageName}
                 type="button"
-                onClick={() => setChecked((c) => (on ? c.filter((a) => a !== app) : [...c, app]))}
+                onClick={() => onToggleApp?.(app.packageName)}
                 className={cn(
                   'w-full flex items-center gap-3 rounded-xl border px-3 py-2.5 text-sm transition-colors',
                   on ? 'border-[hsl(var(--primary))]/60 bg-[hsl(var(--primary))]/10' : 'border-border/60 bg-muted/30',
@@ -60,13 +76,14 @@ export function PureShieldOnboarding({ open, onFinish }: Props) {
                 >
                   {on && <Check className="h-3.5 w-3.5 text-black" />}
                 </span>
-                <span className="font-medium">{app}</span>
+                <span className="font-medium truncate">{app.appName}</span>
               </button>
             );
           })}
         </div>
       ),
     },
+
     {
       icon: Gauge,
       title: 'Performance Tip',

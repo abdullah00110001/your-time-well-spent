@@ -827,7 +827,8 @@ public class ShieldPlugin extends Plugin {
                     });
             });
         } catch (Throwable t) {
-            call.reject("BIOMETRIC_FAILED", t);
+            // PluginCall.reject has no (String, Throwable) overload — pass the message instead.
+            call.reject("BIOMETRIC_FAILED: " + t.getMessage());
         }
     }
 

@@ -372,8 +372,13 @@ export default function ShieldPage() {
     saveLocalData('shield_profiles', updatedProfiles);
   };
 
+  const VALID_SUBPAGES: SubPage[] = [
+    'block-screen', 'block-apps', 'block-sites', 'block-keywords',
+    'floating-timer', 'pure-shield', 'blocking-db', 'app-lock', 'daily-limits',
+  ];
+
   const handleNavigate = (page: string) => {
-    if (page === 'block-screen' || page === 'floating-timer' || page === 'pure-shield') {
+    if (VALID_SUBPAGES.includes(page as SubPage)) {
       setSubPage(page as SubPage);
     }
   };
@@ -557,6 +562,11 @@ export default function ShieldPage() {
           onToggleMode={toggleLanternMode}
           onToggleStrict={toggleLanternStrict}
           onBack={() => navigate('/')}
+          onNavigate={handleNavigate}
+          reelsBlocked={reelsToggle}
+          adultBlocked={adultToggle}
+          onReelsToggle={handleReelsToggle}
+          onAdultToggle={handleAdultToggle}
           groupsSlot={<LifeosGroupsHome defaultType="shield" />}
           settingsSlot={
             <ShieldSettings

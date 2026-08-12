@@ -59,103 +59,8 @@ const categorizeApp = (appName: string): AppUsage['category'] => {
   return 'other';
 };
 
-// Mock data generator for web preview - in native app, this comes from UsageStatsManager
-const generateMockData = (): { screenTime: number; appLaunches: number; apps: AppUsage[] } => {
-  // Randomize slightly for realistic feel
-  const randomFactor = () => 0.8 + Math.random() * 0.4;
-  
-  const apps: AppUsage[] = [
-    { 
-      packageName: 'com.instagram.android', 
-      appName: 'Instagram', 
-      usageMinutes: Math.round(127 * randomFactor()), 
-      launchCount: Math.round(45 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'social'
-    },
-    { 
-      packageName: 'com.zhiliaoapp.musically', 
-      appName: 'TikTok', 
-      usageMinutes: Math.round(98 * randomFactor()), 
-      launchCount: Math.round(32 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'social'
-    },
-    { 
-      packageName: 'com.whatsapp', 
-      appName: 'WhatsApp', 
-      usageMinutes: Math.round(76 * randomFactor()), 
-      launchCount: Math.round(89 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'communication'
-    },
-    { 
-      packageName: 'com.google.android.youtube', 
-      appName: 'YouTube', 
-      usageMinutes: Math.round(65 * randomFactor()), 
-      launchCount: Math.round(12 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'entertainment'
-    },
-    { 
-      packageName: 'com.twitter.android', 
-      appName: 'X (Twitter)', 
-      usageMinutes: Math.round(43 * randomFactor()), 
-      launchCount: Math.round(28 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'social'
-    },
-    { 
-      packageName: 'com.facebook.katana', 
-      appName: 'Facebook', 
-      usageMinutes: Math.round(38 * randomFactor()), 
-      launchCount: Math.round(15 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'social'
-    },
-    { 
-      packageName: 'com.snapchat.android', 
-      appName: 'Snapchat', 
-      usageMinutes: Math.round(29 * randomFactor()), 
-      launchCount: Math.round(21 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'social'
-    },
-    { 
-      packageName: 'com.spotify.music', 
-      appName: 'Spotify', 
-      usageMinutes: Math.round(52 * randomFactor()), 
-      launchCount: Math.round(8 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'entertainment'
-    },
-    { 
-      packageName: 'com.google.android.gm', 
-      appName: 'Gmail', 
-      usageMinutes: Math.round(25 * randomFactor()), 
-      launchCount: Math.round(35 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'productivity'
-    },
-    { 
-      packageName: 'com.slack', 
-      appName: 'Slack', 
-      usageMinutes: Math.round(45 * randomFactor()), 
-      launchCount: Math.round(42 * randomFactor()), 
-      lastUsed: new Date().toISOString(),
-      category: 'communication'
-    },
-  ];
-
-  const totalScreenTime = apps.reduce((sum, app) => sum + app.usageMinutes, 0);
-  const totalLaunches = apps.reduce((sum, app) => sum + app.launchCount, 0);
-
-  return {
-    screenTime: totalScreenTime,
-    appLaunches: totalLaunches,
-    apps: apps.sort((a, b) => b.usageMinutes - a.usageMinutes),
-  };
-};
+// No mock/sample data: on web there is no usage API, so we report an honest zero state.
+const EMPTY_STATS = { screenTime: 0, appLaunches: 0, apps: [] as AppUsage[] };
 
 // Fetch screen time from native layer (real UsageStatsManager on Android)
 const fetchNativeScreenTime = async (): Promise<{ screenTime: number; appLaunches: number; apps: AppUsage[] }> => {
@@ -186,8 +91,8 @@ const fetchNativeScreenTime = async (): Promise<{ screenTime: number; appLaunche
     }
   }
 
-  // Web preview only — mock data so the UI is reviewable
-  return generateMockData();
+  // Web has no usage-stats API — return an empty state instead of fake numbers
+  return EMPTY_STATS;
 };
 
 export function useScreenTime(): ScreenTimeData {

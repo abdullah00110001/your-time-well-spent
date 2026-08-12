@@ -456,7 +456,14 @@ export function PureShieldMainSettings({ onBack }: PureShieldMainSettingsProps) 
 
       <TestBlurDemo open={demoOpen} onClose={() => setDemoOpen(false)} style={config.blurStyle} />
 
-      <PureShieldOnboarding open={onboarding} onFinish={finishOnboarding} />
+      <PureShieldOnboarding
+        open={onboarding}
+        onFinish={finishOnboarding}
+        installedApps={installedApps}
+        targetApps={targetApps}
+        onToggleApp={toggleTargetApp}
+      />
+
     </div>
   );
 }

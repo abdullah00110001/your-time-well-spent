@@ -13,9 +13,9 @@ android {
         applicationId "com.mylifeosv2.app"
         minSdk 24
         targetSdk 35
-        // versionCode / versionName can be overridden from CI via -PversionCode=N -PversionName=X
-        versionCode project.hasProperty('versionCode') ? project.versionCode.toInteger() : 1
-        versionName project.hasProperty('versionName') ? project.versionName.toString() : "1.0"
+        // Hardcoded release version — CI overrides are intentionally ignored
+        versionCode 20
+        versionName "1.0.20"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {

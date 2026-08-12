@@ -43,14 +43,17 @@ import {
   Settings as SettingsIcon,
   Home as HomeIcon,
   BarChart3,
-  History,
-  Play,
-  Pause,
   ShieldCheck,
+  ShieldAlert,
+  Smartphone,
+  Globe,
+  Type,
+  Film,
   ArrowLeft,
   Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Switch } from '@/components/ui/switch';
 import { useScreenTime } from '@/hooks/useScreenTime';
 import { AegisRings, AegisLegend, LatticePanel, type AegisArc } from './AegisRings';
 
@@ -235,6 +238,11 @@ function HomeScreen({
   onStrict,
   onOpenModes,
   onOpenReports,
+  onNavigate,
+  reelsBlocked,
+  adultBlocked,
+  onReelsToggle,
+  onAdultToggle,
 }: {
   streak: number;
   score: number;
@@ -242,6 +250,11 @@ function HomeScreen({
   onStrict: (on: boolean) => void;
   onOpenModes: () => void;
   onOpenReports: () => void;
+  onNavigate: (page: string) => void;
+  reelsBlocked: boolean;
+  adultBlocked: boolean;
+  onReelsToggle: (on: boolean) => void;
+  onAdultToggle: (on: boolean) => void;
 }) {
   const { totalScreenTimeMinutes, appUsage, isLoading } = useScreenTime();
   const budget = 240;
@@ -268,14 +281,14 @@ function HomeScreen({
   // Which layers of armour are currently up.
   const arcs: AegisArc[] = useMemo(
     () => [
-      { id: 'sites', label: 'Sites', active: readList('shield_blocked_sites_v2').some((s: any) => s?.active), ring: 0, onClick: onOpenModes },
-      { id: 'keywords', label: 'Keywords', active: readList('shield_blocked_keywords_v2').length > 0, ring: 0, onClick: onOpenModes },
-      { id: 'adult', label: 'Adult filter', active: localStorage.getItem('shield_adult_block') === '1', ring: 0, onClick: onOpenModes },
-      { id: 'apps', label: 'App locks', active: readList('shield_blocked_apps_v2').length > 0, ring: 1, onClick: onOpenModes },
-      { id: 'reels', label: 'Infinite feeds', active: localStorage.getItem('shield_reels_block') === '1', ring: 1, onClick: onOpenModes },
+      { id: 'sites', label: 'Sites', active: readList('shield_blocked_sites_v2').some((s: any) => s?.active), ring: 0, onClick: () => onNavigate('block-sites') },
+      { id: 'keywords', label: 'Keywords', active: readList('shield_blocked_keywords_v2').length > 0, ring: 0, onClick: () => onNavigate('block-keywords') },
+      { id: 'adult', label: 'Adult filter', active: adultBlocked, ring: 0, onClick: () => onAdultToggle(!adultBlocked) },
+      { id: 'apps', label: 'App locks', active: readList('shield_blocked_apps_v2').length > 0, ring: 1, onClick: () => onNavigate('block-apps') },
+      { id: 'reels', label: 'Infinite feeds', active: reelsBlocked, ring: 1, onClick: () => onReelsToggle(!reelsBlocked) },
       { id: 'watch', label: 'Watch', active: mode !== 'normal', ring: 2, onClick: onOpenModes },
     ],
-    [mode, onOpenModes],
+    [mode, onOpenModes, onNavigate, adultBlocked, reelsBlocked, onAdultToggle, onReelsToggle],
   );
 
   const raised = arcs.filter((a) => a.active).length;
@@ -328,6 +341,82 @@ function HomeScreen({
               <p className="lantern-label mt-1 !mb-0">{s.k}</p>
             </div>
           ))}
+        </div>
+      </LatticePanel>
+
+      {/* ------------------------------------------------ quick blocking controls */}
+      <LatticePanel index={1}>
+        <h2 className="lantern-label">Guard the doors</h2>
+        <div className="-mx-1 divide-y divide-border">
+          {[
+            {
+              id: 'apps',
+              icon: Smartphone,
+              label: 'Blocked apps',
+              count: readList('shield_blocked_apps_v2').length,
+              page: 'block-apps',
+            },
+            {
+              id: 'sites',
+              icon: Globe,
+              label: 'Blocked sites',
+              count: readList('shield_blocked_sites_v2').length,
+              page: 'block-sites',
+            },
+            {
+              id: 'keywords',
+              icon: Type,
+              label: 'Blocked keywords',
+              count: readList('shield_blocked_keywords_v2').length,
+              page: 'block-keywords',
+            },
+          ].map((row) => (
+            <button
+              key={row.id}
+              type="button"
+              onClick={() => onNavigate(row.page)}
+              className="flex w-full items-center justify-between gap-3 px-1 py-3 text-left transition-transform active:scale-[0.99]"
+            >
+              <span className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10">
+                  <row.icon className="h-5 w-5 text-primary" />
+                </span>
+                <span>
+                  <span className="block text-sm font-semibold text-foreground">{row.label}</span>
+                  <span className="block font-mono text-[11px] tabular-nums text-muted-foreground">
+                    {row.count} active
+                  </span>
+                </span>
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </button>
+          ))}
+
+          <div className="flex items-center justify-between gap-3 px-1 py-3">
+            <span className="flex items-center gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10">
+                <Film className="h-5 w-5 text-primary" />
+              </span>
+              <span>
+                <span className="block text-sm font-semibold text-foreground">Block Reels &amp; Shorts</span>
+                <span className="block text-[11px] text-muted-foreground">Stops infinite feeds instantly</span>
+              </span>
+            </span>
+            <Switch checked={reelsBlocked} onCheckedChange={onReelsToggle} />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 px-1 py-3">
+            <span className="flex items-center gap-3">
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10">
+                <ShieldAlert className="h-5 w-5 text-primary" />
+              </span>
+              <span>
+                <span className="block text-sm font-semibold text-foreground">Adult content filter</span>
+                <span className="block text-[11px] text-muted-foreground">Sites, keywords and media</span>
+              </span>
+            </span>
+            <Switch checked={adultBlocked} onCheckedChange={onAdultToggle} />
+          </div>
         </div>
       </LatticePanel>
 
@@ -503,8 +592,6 @@ function ModesScreen({
 
 function ReportsScreen() {
   const { totalScreenTimeMinutes, totalAppLaunches, appUsage, isLoading } = useScreenTime();
-  const [range, setRange] = useState<'day' | 'week' | 'month'>('day');
-  const mult = range === 'day' ? 1 : range === 'week' ? 7 : 30;
 
   const ranked = useMemo(
     () => [...appUsage].sort((a, b) => b.usageMinutes - a.usageMinutes).slice(0, 12),
@@ -517,29 +604,15 @@ function ReportsScreen() {
       <div className="pt-1">
         <p className="lantern-label">The ledger</p>
         <h1 className="text-xl font-bold text-foreground">Every hour, accounted for</h1>
-      </div>
-
-      <div className="flex gap-1 rounded-2xl border border-border bg-card p-1">
-        {(['day', 'week', 'month'] as const).map((r) => (
-          <button
-            key={r}
-            onClick={() => setRange(r)}
-            className={cn(
-              'flex-1 rounded-xl py-2 text-xs font-bold capitalize transition-colors',
-              range === r ? 'bg-primary text-primary-foreground' : 'text-muted-foreground',
-            )}
-          >
-            {r}
-          </button>
-        ))}
+        <p className="mt-1 text-[11px] text-muted-foreground">Today, measured from your device usage.</p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         {[
-          { k: 'Burned', v: fmt(totalScreenTimeMinutes * mult) },
-          { k: 'Pickups', v: `${totalAppLaunches * mult}` },
-          { k: 'Kept', v: fmt(Math.max(0, 240 * mult - totalScreenTimeMinutes * mult)) },
+          { k: 'Burned', v: fmt(totalScreenTimeMinutes) },
+          { k: 'Pickups', v: `${totalAppLaunches}` },
           { k: 'Apps touched', v: `${appUsage.length}` },
+          { k: 'Top app', v: ranked[0] ? fmt(ranked[0].usageMinutes) : '—' },
         ].map((s) => (
           <Panel key={s.k} className="py-3">
             <p className="lantern-label">{s.k}</p>
@@ -554,17 +627,13 @@ function ReportsScreen() {
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : ranked.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No usage recorded yet.</p>
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            No usage recorded yet. Grant Usage Access on your phone to see real numbers here.
+          </p>
         ) : (
           <div className="divide-y divide-border">
             {ranked.map((a, i) => (
-              <WickRow
-                key={a.packageName}
-                name={a.appName}
-                minutes={a.usageMinutes * mult}
-                max={max * mult}
-                rank={i + 1}
-              />
+              <WickRow key={a.packageName} name={a.appName} minutes={a.usageMinutes} max={max} rank={i + 1} />
             ))}
           </div>
         )}
@@ -573,163 +642,45 @@ function ReportsScreen() {
   );
 }
 
-/* -------------------------------------------------------- TIMELAPSE SCREEN */
-
-function TimelapseScreen() {
-  const { appUsage, totalScreenTimeMinutes } = useScreenTime();
-  const [hour, setHour] = useState(new Date().getHours());
-  const [playing, setPlaying] = useState(false);
-  const timer = useRef<number | null>(null);
-
-  useEffect(() => {
-    if (!playing) return;
-    timer.current = window.setInterval(() => setHour((h) => (h + 1) % 24), 550);
-    return () => {
-      if (timer.current) window.clearInterval(timer.current);
-    };
-  }, [playing]);
-
-  // Deterministic per-app hourly shape so the replay is stable across renders.
-  const shape = useMemo(() => {
-    return appUsage.map((a) => {
-      const seed = a.packageName.length + a.appName.charCodeAt(0);
-      const hours = Array.from({ length: 24 }, (_, h) => {
-        const wave = Math.sin((h + seed) * 0.7) + Math.sin((h + seed) * 0.23) + 1.6;
-        const nightDamp = h < 6 ? 0.12 : h > 21 ? 0.6 : 1;
-        return Math.max(0, wave * nightDamp);
-      });
-      const sum = hours.reduce((s, x) => s + x, 0) || 1;
-      return { app: a, hours: hours.map((x) => (x / sum) * a.usageMinutes) };
-    });
-  }, [appUsage]);
-
-  const atHour = useMemo(
-    () =>
-      shape
-        .map((s) => ({ name: s.app.appName, minutes: s.hours[hour], pkg: s.app.packageName }))
-        .sort((a, b) => b.minutes - a.minutes)
-        .slice(0, 8),
-    [shape, hour],
-  );
-  const maxAt = atHour[0]?.minutes || 1;
-  const hourTotal = atHour.reduce((s, x) => s + x.minutes, 0);
-
-  return (
-    <div className="space-y-4">
-      <div className="pt-1">
-        <p className="lantern-label">Time-lapse</p>
-        <h1 className="text-xl font-bold text-foreground">Watch the day burn down</h1>
-      </div>
-
-      <Panel>
-        <div className="mb-4 flex items-end justify-between">
-          <div>
-            <p className="font-mono text-3xl font-bold tabular-nums text-foreground">
-              {String(hour).padStart(2, '0')}
-              <span className="text-muted-foreground">:00</span>
-            </p>
-            <p className="lantern-label mt-1 !mb-0">{fmt(Math.round(hourTotal))} this hour</p>
-          </div>
-          <button
-            onClick={() => setPlaying((p) => !p)}
-            className="grid h-12 w-12 place-items-center rounded-full bg-primary text-primary-foreground transition-transform active:scale-95"
-            aria-label={playing ? 'Pause replay' : 'Play replay'}
-          >
-            {playing ? <Pause className="h-5 w-5" /> : <Play className="ml-0.5 h-5 w-5" />}
-          </button>
-        </div>
-
-        {/* 24-hour ribbon of light */}
-        <div className="flex h-16 items-end gap-[3px]">
-          {Array.from({ length: 24 }).map((_, h) => {
-            const v = shape.reduce((s, x) => s + x.hours[h], 0);
-            const peak = Math.max(
-              1,
-              ...Array.from({ length: 24 }, (_, k) => shape.reduce((s, x) => s + x.hours[k], 0)),
-            );
-            return (
-              <button
-                key={h}
-                onClick={() => {
-                  setPlaying(false);
-                  setHour(h);
-                }}
-                className="group flex-1"
-                aria-label={`Hour ${h}`}
-              >
-                <div
-                  className={cn(
-                    'w-full rounded-sm transition-all duration-300',
-                    h === hour ? 'bg-primary' : 'bg-primary/25',
-                  )}
-                  style={{ height: `${Math.max(6, (v / peak) * 60)}px` }}
-                />
-              </button>
-            );
-          })}
-        </div>
-        <div className="mt-2 flex justify-between font-mono text-[10px] tabular-nums text-muted-foreground">
-          <span>00</span>
-          <span>06</span>
-          <span>12</span>
-          <span>18</span>
-          <span>23</span>
-        </div>
-      </Panel>
-
-      <Panel title="Apps alight at this hour" hint={fmt(totalScreenTimeMinutes)}>
-        {atHour.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">No usage recorded yet.</p>
-        ) : (
-          <div className="divide-y divide-border">
-            {atHour.map((a, i) => (
-              <WickRow key={a.pkg} name={a.name} minutes={Math.round(a.minutes)} max={maxAt} rank={i + 1} />
-            ))}
-          </div>
-        )}
-      </Panel>
-    </div>
-  );
-}
 
 /* ---------------------------------------------------------------- BOTTOM NAV */
 
 const TABS = [
   { id: 'dashboard', icon: HomeIcon, label: 'Home' },
-  { id: 'modes', icon: Flame, label: 'Watches' },
-  { id: 'reports', icon: BarChart3, label: 'Ledger' },
-  { id: 'timelapse', icon: History, label: 'Lapse' },
-  { id: 'groups', icon: Users, label: 'Circle' },
-  { id: 'settings', icon: SettingsIcon, label: 'Setup' },
+  { id: 'modes', icon: Flame, label: 'Modes' },
+  { id: 'reports', icon: BarChart3, label: 'Reports' },
+  { id: 'groups', icon: Users, label: 'Groups' },
+  { id: 'settings', icon: SettingsIcon, label: 'Settings' },
 ];
 
+/** Identical bar to the global MobileNav (height, blur, safe-area, typography). */
 function LanternNav({ active, onChange }: { active: string; onChange: (t: string) => void }) {
   return (
-    <nav className="lantern-nav fixed inset-x-0 bottom-0 z-50">
-      <div className="mx-auto flex max-w-lg items-stretch justify-around px-1 pb-[max(env(safe-area-inset-bottom),0.35rem)] pt-1.5">
+    <div
+      className="fixed bottom-0 left-0 right-0 z-50 bg-background/95 backdrop-blur-lg border-t border-border select-none"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+    >
+      <nav className="flex items-center justify-around h-16 px-1 max-w-lg mx-auto">
         {TABS.map((t) => {
-          const on = active === t.id;
+          const isActive = active === t.id;
           return (
             <button
               key={t.id}
+              type="button"
               onClick={() => onChange(t.id)}
-              className="relative flex min-w-[46px] flex-col items-center gap-1 rounded-xl px-1.5 py-1.5"
+              className={cn(
+                'flex flex-col items-center justify-center gap-1 px-2 py-2 rounded-lg transition-all select-none active:scale-95',
+                isActive ? 'text-primary' : 'text-muted-foreground',
+              )}
+              style={{ minWidth: 44, minHeight: 44 }}
             >
-              {on && <span className="absolute -top-0.5 h-0.5 w-6 rounded-full bg-primary" />}
-              <t.icon className={cn('h-[18px] w-[18px]', on ? 'text-primary' : 'text-muted-foreground')} />
-              <span
-                className={cn(
-                  'text-[9px] font-bold uppercase tracking-wide',
-                  on ? 'text-primary' : 'text-muted-foreground',
-                )}
-              >
-                {t.label}
-              </span>
+              <t.icon className={cn('h-5 w-5 transition-transform', isActive && 'scale-110')} />
+              <span className="text-[10px] font-medium">{t.label}</span>
             </button>
           );
         })}
-      </div>
-    </nav>
+      </nav>
+    </div>
   );
 }
 
@@ -745,6 +696,12 @@ interface FocusShieldUIProps {
   onToggleMode: (m: 'focus' | 'sleep') => void;
   onToggleStrict: (on: boolean) => void;
   onBack?: () => void;
+  /** Opens a Shield sub page (block-apps, block-sites, block-keywords, ...). */
+  onNavigate: (page: string) => void;
+  reelsBlocked: boolean;
+  adultBlocked: boolean;
+  onReelsToggle: (on: boolean) => void;
+  onAdultToggle: (on: boolean) => void;
   /** Existing feature surfaces injected unchanged. */
   groupsSlot: React.ReactNode;
   settingsSlot: React.ReactNode;
@@ -760,6 +717,11 @@ export function FocusShieldUI({
   onToggleMode,
   onToggleStrict,
   onBack,
+  onNavigate,
+  reelsBlocked,
+  adultBlocked,
+  onReelsToggle,
+  onAdultToggle,
   groupsSlot,
   settingsSlot,
 }: FocusShieldUIProps) {
@@ -798,13 +760,17 @@ export function FocusShieldUI({
             onStrict={onToggleStrict}
             onOpenModes={() => onTabChange('modes')}
             onOpenReports={() => onTabChange('reports')}
+            onNavigate={onNavigate}
+            reelsBlocked={reelsBlocked}
+            adultBlocked={adultBlocked}
+            onReelsToggle={onReelsToggle}
+            onAdultToggle={onAdultToggle}
           />
         )}
         {activeTab === 'modes' && (
           <ModesScreen mode={mode} busy={modeBusy} onToggle={onToggleMode} onStrict={onToggleStrict} />
         )}
         {activeTab === 'reports' && <ReportsScreen />}
-        {activeTab === 'timelapse' && <TimelapseScreen />}
         {activeTab === 'groups' && (
           <div className="space-y-4">
             <div className="pt-1">

@@ -33,15 +33,10 @@ export function ShieldReports() {
             setBlockedAttempts(b.blockedAttemptsToday || 0);
           } catch {/* */}
         } else {
-          // Web mock
-          setTopApps([
-            { name: 'Instagram', minutes: 84 },
-            { name: 'YouTube', minutes: 62 },
-            { name: 'Chrome', minutes: 41 },
-            { name: 'WhatsApp', minutes: 28 },
-          ]);
-          setTotalMinutes(215);
-          setBlockedAttempts(7);
+          // Web has no usage-stats source — show real emptiness instead of fake numbers.
+          setTopApps([]);
+          setTotalMinutes(0);
+          setBlockedAttempts(0);
         }
         const cleanStreak = parseInt(localStorage.getItem('shield_clean_streak') || '0', 10);
         setStreak(cleanStreak);
