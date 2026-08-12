@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { isNative, hideSplash } from '@/lib/capacitor/platform';
+import { CURRENT_APP_VERSION_NAME } from '@/constants/version';
 
 interface MobileSplashProps {
   minimumDuration?: number;
