@@ -13,9 +13,17 @@ android {
         applicationId "com.mylifeosv2.app"
         minSdk 24
         targetSdk 35
-        // versionCode / versionName can be overridden from CI via -PversionCode=N -PversionName=X
-        versionCode project.hasProperty('versionCode') ? project.versionCode.toInteger() : 1
-        versionName project.hasProperty('versionName') ? project.versionName.toString() : "1.0"
+        // A previously published APK shipped versionCode 3473498. Android refuses to
+        // install an APK whose versionCode is LOWER than the installed one ("App not
+        // installed"), so every build MUST stay above that watermark. CI passes a small
+        // incrementing number (-PversionCode=<run_number>); we add a fixed base offset
+        // so the effective code is always monotonic and above the old watermark.
+        // Keep VERSION_CODE_BASE in sync with src/constants/version.ts.
+        def versionCodeBase = 3500000
+        def ciVersionCode = project.hasProperty('versionCode') ? project.versionCode.toInteger() : 0
+        versionCode versionCodeBase + ciVersionCode
+        versionName project.hasProperty('versionName') ? project.versionName.toString() : "1.0.20"
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {

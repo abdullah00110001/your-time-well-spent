@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { cn } from '@/lib/utils';
 import { isNative, hideSplash } from '@/lib/capacitor/platform';
+import { CURRENT_APP_VERSION_NAME } from '@/constants/version';
 
 interface MobileSplashProps {
   minimumDuration?: number;
@@ -75,7 +76,7 @@ export function MobileSplash({
 
       {/* Version info */}
       <div className="absolute bottom-8 text-center">
-        <p className="text-xs text-muted-foreground">v1.0.0</p>
+        <p className="text-xs text-muted-foreground">v{CURRENT_APP_VERSION_NAME}</p>
       </div>
     </div>
   );
