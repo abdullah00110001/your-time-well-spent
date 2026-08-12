@@ -75,7 +75,7 @@ export function MobileSplash({
 
       {/* Version info */}
       <div className="absolute bottom-8 text-center">
-        <p className="text-xs text-muted-foreground">v1.0.0</p>
+        <p className="text-xs text-muted-foreground">v{CURRENT_APP_VERSION_NAME}</p>
       </div>
     </div>
   );
