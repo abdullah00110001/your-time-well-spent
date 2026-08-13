@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { supabase } from '@/integrations/supabase/client';
 import { Download, CheckCircle2, Loader2, RefreshCw, Sparkles } from 'lucide-react';
-import { CURRENT_APP_VERSION_CODE } from '@/constants/version';
+import { CURRENT_APP_VERSION_CODE, CURRENT_APP_VERSION_NAME } from '@/constants/version';
 
 export default function AppUpdateChecker() {
   const [loading, setLoading] = useState(true);
@@ -62,8 +62,8 @@ export default function AppUpdateChecker() {
       <CardContent className="space-y-4">
         <div className="flex items-center justify-between">
           <div>
-            <p className="text-sm text-muted-foreground">Current Version Code</p>
-            <Badge variant="outline">{CURRENT_APP_VERSION_CODE}</Badge>
+            <p className="text-sm text-muted-foreground">Current Version</p>
+            <Badge variant="outline">{CURRENT_APP_VERSION_NAME}</Badge>
           </div>
           <Button variant="ghost" size="sm" onClick={checkForUpdates} disabled={checking}>
             <RefreshCw className={`h-4 w-4 mr-1 ${checking ? 'animate-spin' : ''}`} />
