@@ -118,12 +118,7 @@ jobs:
       - name: Rename to LifeOS.apk
         run: mv android/app/build/outputs/apk/release/app-release.apk android/app/build/outputs/apk/release/LifeOS.apk
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: LifeOS-APK
-          path: android/app/build/outputs/apk/release/LifeOS.apk
-
+ 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
