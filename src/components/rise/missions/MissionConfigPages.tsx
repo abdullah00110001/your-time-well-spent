@@ -20,6 +20,7 @@ import { ArrowLeft, X, Camera, RefreshCw, Check, Zap, Calculator, QrCode, Smartp
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { isNative } from '@/lib/capacitor/platform';
+import { lightImpact, mediumImpact, selectionChanged, successNotification, errorNotification } from '@/lib/capacitor/nativeHaptics';
 import { cn } from '@/lib/utils';
 
 /* ─── Types ────────────────────────────────────────────── */
