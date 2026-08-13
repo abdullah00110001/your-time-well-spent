@@ -16,7 +16,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, X, Camera, RefreshCw, Check, Zap, Calculator, QrCode, Smartphone, Type, ChevronUp, ChevronDown } from 'lucide-react';
+import { ArrowLeft, X, Camera, RefreshCw, Check, Zap, Calculator, QrCode, Smartphone, Type, ChevronUp, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { isNative } from '@/lib/capacitor/platform';
