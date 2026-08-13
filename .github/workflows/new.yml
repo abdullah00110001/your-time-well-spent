@@ -58,7 +58,7 @@ jobs:
       - name: Verify keystore is present
         run: |
           set -e
-          KS="android/app/mylifeos-release.keystore"
+          KS="android/app/mylifeos-release-v2.keystore"
           echo "── Keystore path check ──"
           ls -la "$KS"
           SIZE=$(stat -c%s "$KS")
@@ -69,7 +69,7 @@ jobs:
             exit 1
           fi
           echo "── Keystore contents (keytool -list) ──"
-          keytool -list -keystore "$KS" -storepass lifeos123 -v | head -30
+          keytool -list -keystore "$KS" -storepass lifeos123456 -v | head -30
           echo "── Signing config sanity ──"
           grep -n "signingConfig" android/app/build.gradle
           grep -n "storeFile"     android/app/build.gradle
@@ -81,8 +81,6 @@ jobs:
           set -eo pipefail
           cd android
           ./gradlew assembleRelease \
-            -PversionCode=${{ github.run_number }} \
-            -PversionName=1.0.${{ github.run_number }} \
             --no-daemon --stacktrace --info 2>&1 | tee gradle-build.log
           echo "── Signing-related task lines ──"
           grep -Ei "sign|package.*release|zipalign" gradle-build.log | tail -40 || true
@@ -127,8 +125,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: LifeOS Release 1.0.${{ github.run_number }}
+          tag_name: v1.0.21
+          name: LifeOS Release 1.0.21
           files: android/app/build/outputs/apk/release/LifeOS.apk
           generate_release_notes: true
         env:
