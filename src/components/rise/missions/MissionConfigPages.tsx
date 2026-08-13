@@ -214,9 +214,19 @@ function PreviewShell({ title, onExit, children }: { title: string; onExit: () =
 function MathConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSave: (c: MissionConfig) => void; onClose: () => void }) {
   const [difficulty, setDifficulty] = useState<MissionDifficulty>(value.difficulty ?? 'easy');
   const [count, setCount]           = useState(value.count ?? 1);
-  const [preview, setPreview]       = useState<{ q: string; a: number } | null>(null);
+  const [problem, setProblem]       = useState<{ q: string; a: number } | null>(null);
   const [userInput, setUserInput]   = useState('');
   const [isError, setIsError]       = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [solved, setSolved]         = useState(0);
+  const timers                       = useRef<number[]>([]);
+
+  const later = (fn: () => void, ms: number) => {
+    const id = window.setTimeout(fn, ms);
+    timers.current.push(id);
+  };
+
+  useEffect(() => () => { timers.current.forEach(clearTimeout); timers.current = []; }, []);
 
   const generateProblem = () => {
     let a: number, b: number, q: string, ans: number;
@@ -235,23 +245,50 @@ function MathConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSa
       b = Math.floor(Math.random() * 9) + 2;
       q = `${a}×${b}`; ans = a * b;
     }
-    setPreview({ q, a: ans });
+    setProblem({ q, a: ans });
     setUserInput('');
     setIsError(false);
   };
 
-  useEffect(() => { generateProblem(); }, [difficulty]);
+  // Regenerate the sample problem whenever the difficulty changes.
+  useEffect(() => { generateProblem(); /* eslint-disable-next-line */ }, [difficulty]);
+
+  const startPreview = () => {
+    setSolved(0);
+    generateProblem();
+    setPreviewing(true);
+  };
+
+  const exitPreview = () => {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    setPreviewing(false);
+    setUserInput('');
+    setSolved(0);
+  };
 
   const handleKey = (k: string) => {
-    if (k === '⌫') { setUserInput(p => p.slice(0, -1)); return; }
+    if (!problem) return;
+    void lightImpact();
+    if (k === '⌫') { setUserInput((p) => p.slice(0, -1)); return; }
     const next = userInput + k;
     setUserInput(next);
-    if (preview && parseInt(next) === preview.a) {
-      toast.success('Correct! 🎉');
-      setTimeout(generateProblem, 400);
-    } else if (next.length >= preview!.a.toString().length && parseInt(next) !== preview!.a) {
+    const expected = problem.a.toString();
+    if (next === expected) {
+      void successNotification();
+      const done = solved + 1;
+      setSolved(done);
+      if (done >= count) {
+        toast.success('Preview complete — alarm would dismiss ✓');
+        later(exitPreview, 700);
+      } else {
+        toast.success(`Correct! ${done}/${count}`);
+        later(generateProblem, 400);
+      }
+    } else if (next.length >= expected.length) {
+      void errorNotification();
       setIsError(true);
-      setTimeout(() => { setIsError(false); setUserInput(''); }, 500);
+      later(() => { setIsError(false); setUserInput(''); }, 500);
     }
   };
 
@@ -262,48 +299,74 @@ function MathConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSa
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0E1117]">
+    <div className="relative flex flex-col h-full bg-[#0E1117]">
       <ConfigHeader title="Math" onClose={onClose} />
 
-      {/* Live preview */}
+      {/* SETUP — no keypad here, only a static sample of the problem */}
       <div className="flex-1 flex flex-col px-4 gap-4 overflow-auto">
-        <div className="bg-[#1A1D26] rounded-2xl p-5">
-          <p className="text-white text-4xl font-black text-center mb-4">
-            {preview?.q} =
+        <div className="bg-[#1A1D26] rounded-2xl p-6">
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <Calculator className="h-4 w-4 text-cyan-400" />
+            <span className="text-cyan-400 text-xs font-bold uppercase tracking-wider">Example</span>
+          </div>
+          <p className="text-white text-4xl font-black text-center">
+            {problem?.q} = <span className="text-white/25">?</span>
           </p>
-          <div className={cn(
-            'h-14 rounded-xl border-2 flex items-center justify-center text-2xl font-bold transition-all',
-            isError ? 'border-red-500 text-red-400 bg-red-500/10' : userInput ? 'border-cyan-400 text-white' : 'border-white/10 text-white/20',
-          )}>
-            {userInput || '?'}
-          </div>
-          {/* Numpad */}
-          <div className="grid grid-cols-3 gap-2 mt-4">
-            {[1,2,3,4,5,6,7,8,9].map(n => (
-              <button key={n} onClick={() => handleKey(String(n))}
-                className="h-12 rounded-xl bg-white/8 text-white text-xl font-semibold active:bg-white/20 transition-colors">
-                {n}
-              </button>
-            ))}
-            <button onClick={() => handleKey('⌫')} className="h-12 rounded-xl bg-white/8 text-white/60 text-base active:bg-white/20">⌫</button>
-            <button onClick={() => handleKey('0')} className="h-12 rounded-xl bg-white/8 text-white text-xl font-semibold active:bg-white/20">0</button>
-            <button onClick={generateProblem} className="h-12 rounded-xl bg-white/8 text-white/60 flex items-center justify-center active:bg-white/20">
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
+          <p className="text-white/40 text-sm text-center mt-3">
+            Solve {count} {count === 1 ? 'problem' : 'problems'} to dismiss the alarm
+          </p>
+          <button
+            onClick={() => { void lightImpact(); generateProblem(); }}
+            className="mx-auto mt-4 flex items-center gap-2 rounded-full bg-white/8 px-4 py-2 text-white/60 text-xs active:scale-95 transition-transform"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> New example
+          </button>
         </div>
 
-        {/* Difficulty */}
         <DifficultySlider value={difficulty} onChange={setDifficulty} />
-
-        {/* Count */}
         <CountPicker value={count} onChange={setCount} max={10} label="times" />
       </div>
 
-      <ActionButtons onPreview={generateProblem} onComplete={handleComplete} />
+      <ActionButtons onPreview={startPreview} onComplete={handleComplete} />
+
+      {/* PREVIEW — full-screen challenge with the working keypad */}
+      {previewing && (
+        <PreviewShell title="Math challenge" onExit={exitPreview}>
+          <div className="flex-1 flex flex-col justify-center px-5 pb-[max(env(safe-area-inset-bottom),1rem)]">
+            <p className="text-white/40 text-center text-xs mb-2">{solved}/{count} solved</p>
+            <p className="text-white text-5xl font-black text-center mb-6">{problem?.q} =</p>
+            <div className={cn(
+              'h-16 rounded-2xl border-2 flex items-center justify-center text-3xl font-bold transition-all',
+              isError ? 'border-red-500 text-red-400 bg-red-500/10' : userInput ? 'border-cyan-400 text-white' : 'border-white/10 text-white/20',
+            )}>
+              {userInput || '?'}
+            </div>
+            <div className="grid grid-cols-3 gap-3 mt-6">
+              {[1,2,3,4,5,6,7,8,9].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => handleKey(String(n))}
+                  className="h-16 rounded-2xl bg-white/8 text-white text-2xl font-semibold active:bg-white/25 active:scale-95 transition-all"
+                >
+                  {n}
+                </button>
+              ))}
+              <button onClick={() => handleKey('⌫')} className="h-16 rounded-2xl bg-white/8 text-white/60 text-lg active:bg-white/25 active:scale-95 transition-all">⌫</button>
+              <button onClick={() => handleKey('0')} className="h-16 rounded-2xl bg-white/8 text-white text-2xl font-semibold active:bg-white/25 active:scale-95 transition-all">0</button>
+              <button
+                onClick={() => { void lightImpact(); generateProblem(); }}
+                aria-label="Skip problem"
+                className="h-16 rounded-2xl bg-white/8 text-white/60 flex items-center justify-center active:bg-white/25 active:scale-95 transition-all"
+              >
+                <RefreshCw className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+        </PreviewShell>
+      )}
     </div>
   );
-}
+
 
 /* ══════════════════════════════════════════════════════════
    2. SHAKE CONFIG
