@@ -16,10 +16,11 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { ArrowLeft, X, Camera, RefreshCw, Check, Zap, Calculator, QrCode, Smartphone, Type, ChevronUp, ChevronDown } from 'lucide-react';
+import { ArrowLeft, X, Camera, RefreshCw, Check, Zap, Calculator, QrCode, Smartphone, Type, ChevronUp, ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { isNative } from '@/lib/capacitor/platform';
+import { lightImpact, mediumImpact, selectionChanged, successNotification, errorNotification } from '@/lib/capacitor/nativeHaptics';
 import { cn } from '@/lib/utils';
 
 /* ─── Types ────────────────────────────────────────────── */
@@ -57,27 +58,37 @@ export function MissionConfigRouter({ missionId, value, onSave, onClose }: Route
 
 /* ─── Shared primitives ─────────────────────────────────── */
 
+/**
+ * Single close/back control only — the previous version rendered an extra `X`
+ * on the right which duplicated the left control and confused users.
+ */
 function ConfigHeader({ title, onBack, onClose }: { title: string; onBack?: () => void; onClose: () => void }) {
+  const handle = () => { void lightImpact(); (onBack ?? onClose)(); };
   return (
-    <div className="flex items-center justify-between px-4 py-4 shrink-0">
-      <button onClick={onBack ?? onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10">
+    <div className="flex items-center gap-3 px-4 py-4 shrink-0">
+      <button
+        onClick={handle}
+        aria-label={onBack ? 'Back' : 'Close'}
+        className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 active:scale-95 transition-transform"
+      >
         {onBack ? <ArrowLeft className="h-5 w-5 text-white" /> : <X className="h-5 w-5 text-white" />}
       </button>
       <span className="text-white font-bold text-base">{title}</span>
-      <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10">
-        <X className="h-5 w-5 text-white" />
-      </button>
     </div>
   );
 }
 
 // Scroll wheel picker — 1..max
 function CountPicker({ value, onChange, max = 10, label = 'times' }: { value: number; onChange: (n: number) => void; max?: number; label?: string }) {
-  const items = Array.from({ length: max }, (_, i) => i + 1);
+  const step = (n: number) => { void selectionChanged(); onChange(n); };
   return (
     <div className="flex items-center justify-center gap-8 bg-white/5 rounded-2xl py-4">
       <div className="flex flex-col items-center w-28">
-        <button onClick={() => onChange(Math.max(1, value - 1))} className="p-2">
+        <button
+          onClick={() => step(Math.max(1, value - 1))}
+          aria-label="Decrease"
+          className="p-2 active:scale-90 transition-transform"
+        >
           <ChevronUp className="h-5 w-5 text-white/40" />
         </button>
         <div className="relative h-24 overflow-hidden w-full flex flex-col items-center">
@@ -97,7 +108,11 @@ function CountPicker({ value, onChange, max = 10, label = 'times' }: { value: nu
             );
           })}
         </div>
-        <button onClick={() => onChange(Math.min(max, value + 1))} className="p-2">
+        <button
+          onClick={() => step(Math.min(max, value + 1))}
+          aria-label="Increase"
+          className="p-2 active:scale-90 transition-transform"
+        >
           <ChevronDown className="h-5 w-5 text-white/40" />
         </button>
       </div>
@@ -106,12 +121,13 @@ function CountPicker({ value, onChange, max = 10, label = 'times' }: { value: nu
   );
 }
 
-// Difficulty slider
+// Difficulty slider — the only place difficulty is configured (removed from the alarm editor summary)
 function DifficultySlider({ value, onChange }: { value: MissionDifficulty; onChange: (d: MissionDifficulty) => void }) {
   const levels: MissionDifficulty[] = ['easy', 'medium', 'hard'];
   const idx = levels.indexOf(value);
   return (
     <div className="bg-white/5 rounded-2xl p-4">
+      <p className="text-white/40 text-[11px] uppercase tracking-wider text-center">Difficulty</p>
       <p className="text-white font-bold text-center text-xl mb-4 capitalize">{value}</p>
       <div className="relative px-2">
         <div className="h-1.5 bg-white/10 rounded-full" />
@@ -124,7 +140,8 @@ function DifficultySlider({ value, onChange }: { value: MissionDifficulty; onCha
           min={0}
           max={2}
           value={idx}
-          onChange={(e) => onChange(levels[parseInt(e.target.value)])}
+          aria-label="Difficulty"
+          onChange={(e) => { void selectionChanged(); onChange(levels[parseInt(e.target.value)]); }}
           className="absolute inset-0 opacity-0 w-full cursor-pointer"
         />
         {/* thumb */}
@@ -147,21 +164,48 @@ function ActionButtons({ onPreview, onComplete, previewLabel = 'Preview' }: { on
     <div className="flex gap-3 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 shrink-0">
       {onPreview && (
         <button
-          onClick={onPreview}
-          className="flex-1 h-14 rounded-2xl bg-white/10 text-white font-bold text-base"
+          onClick={() => { void lightImpact(); onPreview(); }}
+          className="flex-1 h-14 rounded-2xl bg-white/10 text-white font-bold text-base active:scale-[0.98] transition-transform"
         >
           {previewLabel}
         </button>
       )}
       <button
-        onClick={onComplete}
-        className="flex-1 h-14 rounded-2xl bg-white text-black font-bold text-base"
+        onClick={() => { void mediumImpact(); onComplete(); }}
+        className="flex-1 h-14 rounded-2xl bg-white text-black font-bold text-base active:scale-[0.98] transition-transform"
       >
         Complete
       </button>
     </div>
   );
 }
+
+/**
+ * Full-screen mission PREVIEW — this is the only place a keypad / typing input
+ * is shown. The setup screens stay clean (no live keyboard), matching the real
+ * alarm-ring experience.
+ */
+function PreviewShell({ title, onExit, children }: { title: string; onExit: () => void; children: React.ReactNode }) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col bg-[#07090F]">
+      <div className="flex items-center gap-3 px-4 py-4 shrink-0 pt-[max(env(safe-area-inset-top),1rem)]">
+        <button
+          onClick={() => { void lightImpact(); onExit(); }}
+          aria-label="Exit preview"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 active:scale-95 transition-transform"
+        >
+          <X className="h-5 w-5 text-white" />
+        </button>
+        <div>
+          <p className="text-white font-bold text-base leading-tight">{title}</p>
+          <p className="text-white/40 text-[11px]">Preview — how it looks when the alarm rings</p>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 
 /* ══════════════════════════════════════════════════════════
    1. MATH CONFIG
@@ -170,9 +214,19 @@ function ActionButtons({ onPreview, onComplete, previewLabel = 'Preview' }: { on
 function MathConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSave: (c: MissionConfig) => void; onClose: () => void }) {
   const [difficulty, setDifficulty] = useState<MissionDifficulty>(value.difficulty ?? 'easy');
   const [count, setCount]           = useState(value.count ?? 1);
-  const [preview, setPreview]       = useState<{ q: string; a: number } | null>(null);
+  const [problem, setProblem]       = useState<{ q: string; a: number } | null>(null);
   const [userInput, setUserInput]   = useState('');
   const [isError, setIsError]       = useState(false);
+  const [previewing, setPreviewing] = useState(false);
+  const [solved, setSolved]         = useState(0);
+  const timers                       = useRef<number[]>([]);
+
+  const later = (fn: () => void, ms: number) => {
+    const id = window.setTimeout(fn, ms);
+    timers.current.push(id);
+  };
+
+  useEffect(() => () => { timers.current.forEach(clearTimeout); timers.current = []; }, []);
 
   const generateProblem = () => {
     let a: number, b: number, q: string, ans: number;
@@ -191,23 +245,50 @@ function MathConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSa
       b = Math.floor(Math.random() * 9) + 2;
       q = `${a}×${b}`; ans = a * b;
     }
-    setPreview({ q, a: ans });
+    setProblem({ q, a: ans });
     setUserInput('');
     setIsError(false);
   };
 
-  useEffect(() => { generateProblem(); }, [difficulty]);
+  // Regenerate the sample problem whenever the difficulty changes.
+  useEffect(() => { generateProblem(); /* eslint-disable-next-line */ }, [difficulty]);
+
+  const startPreview = () => {
+    setSolved(0);
+    generateProblem();
+    setPreviewing(true);
+  };
+
+  const exitPreview = () => {
+    timers.current.forEach(clearTimeout);
+    timers.current = [];
+    setPreviewing(false);
+    setUserInput('');
+    setSolved(0);
+  };
 
   const handleKey = (k: string) => {
-    if (k === '⌫') { setUserInput(p => p.slice(0, -1)); return; }
+    if (!problem) return;
+    void lightImpact();
+    if (k === '⌫') { setUserInput((p) => p.slice(0, -1)); return; }
     const next = userInput + k;
     setUserInput(next);
-    if (preview && parseInt(next) === preview.a) {
-      toast.success('Correct! 🎉');
-      setTimeout(generateProblem, 400);
-    } else if (next.length >= preview!.a.toString().length && parseInt(next) !== preview!.a) {
+    const expected = problem.a.toString();
+    if (next === expected) {
+      void successNotification();
+      const done = solved + 1;
+      setSolved(done);
+      if (done >= count) {
+        toast.success('Preview complete — alarm would dismiss ✓');
+        later(exitPreview, 700);
+      } else {
+        toast.success(`Correct! ${done}/${count}`);
+        later(generateProblem, 400);
+      }
+    } else if (next.length >= expected.length) {
+      void errorNotification();
       setIsError(true);
-      setTimeout(() => { setIsError(false); setUserInput(''); }, 500);
+      later(() => { setIsError(false); setUserInput(''); }, 500);
     }
   };
 
@@ -218,48 +299,76 @@ function MathConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSa
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#0E1117]">
+    <div className="relative flex flex-col h-full bg-[#0E1117]">
       <ConfigHeader title="Math" onClose={onClose} />
 
-      {/* Live preview */}
+      {/* SETUP — no keypad here, only a static sample of the problem */}
       <div className="flex-1 flex flex-col px-4 gap-4 overflow-auto">
-        <div className="bg-[#1A1D26] rounded-2xl p-5">
-          <p className="text-white text-4xl font-black text-center mb-4">
-            {preview?.q} =
+        <div className="bg-[#1A1D26] rounded-2xl p-6">
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <Calculator className="h-4 w-4 text-cyan-400" />
+            <span className="text-cyan-400 text-xs font-bold uppercase tracking-wider">Example</span>
+          </div>
+          <p className="text-white text-4xl font-black text-center">
+            {problem?.q} = <span className="text-white/25">?</span>
           </p>
-          <div className={cn(
-            'h-14 rounded-xl border-2 flex items-center justify-center text-2xl font-bold transition-all',
-            isError ? 'border-red-500 text-red-400 bg-red-500/10' : userInput ? 'border-cyan-400 text-white' : 'border-white/10 text-white/20',
-          )}>
-            {userInput || '?'}
-          </div>
-          {/* Numpad */}
-          <div className="grid grid-cols-3 gap-2 mt-4">
-            {[1,2,3,4,5,6,7,8,9].map(n => (
-              <button key={n} onClick={() => handleKey(String(n))}
-                className="h-12 rounded-xl bg-white/8 text-white text-xl font-semibold active:bg-white/20 transition-colors">
-                {n}
-              </button>
-            ))}
-            <button onClick={() => handleKey('⌫')} className="h-12 rounded-xl bg-white/8 text-white/60 text-base active:bg-white/20">⌫</button>
-            <button onClick={() => handleKey('0')} className="h-12 rounded-xl bg-white/8 text-white text-xl font-semibold active:bg-white/20">0</button>
-            <button onClick={generateProblem} className="h-12 rounded-xl bg-white/8 text-white/60 flex items-center justify-center active:bg-white/20">
-              <RefreshCw className="h-4 w-4" />
-            </button>
-          </div>
+          <p className="text-white/40 text-sm text-center mt-3">
+            Solve {count} {count === 1 ? 'problem' : 'problems'} to dismiss the alarm
+          </p>
+          <button
+            onClick={() => { void lightImpact(); generateProblem(); }}
+            className="mx-auto mt-4 flex items-center gap-2 rounded-full bg-white/8 px-4 py-2 text-white/60 text-xs active:scale-95 transition-transform"
+          >
+            <RefreshCw className="h-3.5 w-3.5" /> New example
+          </button>
         </div>
 
-        {/* Difficulty */}
         <DifficultySlider value={difficulty} onChange={setDifficulty} />
-
-        {/* Count */}
         <CountPicker value={count} onChange={setCount} max={10} label="times" />
       </div>
 
-      <ActionButtons onPreview={generateProblem} onComplete={handleComplete} />
+      <ActionButtons onPreview={startPreview} onComplete={handleComplete} />
+
+      {/* PREVIEW — full-screen challenge with the working keypad */}
+      {previewing && (
+        <PreviewShell title="Math challenge" onExit={exitPreview}>
+          <div className="flex-1 flex flex-col justify-center px-5 pb-[max(env(safe-area-inset-bottom),1rem)]">
+            <p className="text-white/40 text-center text-xs mb-2">{solved}/{count} solved</p>
+            <p className="text-white text-5xl font-black text-center mb-6">{problem?.q} =</p>
+            <div className={cn(
+              'h-16 rounded-2xl border-2 flex items-center justify-center text-3xl font-bold transition-all',
+              isError ? 'border-red-500 text-red-400 bg-red-500/10' : userInput ? 'border-cyan-400 text-white' : 'border-white/10 text-white/20',
+            )}>
+              {userInput || '?'}
+            </div>
+            <div className="grid grid-cols-3 gap-3 mt-6">
+              {[1,2,3,4,5,6,7,8,9].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => handleKey(String(n))}
+                  className="h-16 rounded-2xl bg-white/8 text-white text-2xl font-semibold active:bg-white/25 active:scale-95 transition-all"
+                >
+                  {n}
+                </button>
+              ))}
+              <button onClick={() => handleKey('⌫')} className="h-16 rounded-2xl bg-white/8 text-white/60 text-lg active:bg-white/25 active:scale-95 transition-all">⌫</button>
+              <button onClick={() => handleKey('0')} className="h-16 rounded-2xl bg-white/8 text-white text-2xl font-semibold active:bg-white/25 active:scale-95 transition-all">0</button>
+              <button
+                onClick={() => { void lightImpact(); generateProblem(); }}
+                aria-label="Skip problem"
+                className="h-16 rounded-2xl bg-white/8 text-white/60 flex items-center justify-center active:bg-white/25 active:scale-95 transition-all"
+              >
+                <RefreshCw className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+        </PreviewShell>
+      )}
     </div>
   );
 }
+
+
 
 /* ══════════════════════════════════════════════════════════
    2. SHAKE CONFIG
@@ -562,19 +671,51 @@ const PRESET_PHRASES = [
 
 function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSave: (c: MissionConfig) => void; onClose: () => void }) {
   const [phrase,          setPhrase]          = useState(value.typingPhrase ?? PRESET_PHRASES[0]);
+  const [difficulty,      setDifficulty]      = useState<MissionDifficulty>(value.difficulty ?? 'easy');
   const [count,           setCount]           = useState(value.count ?? 1);
   const [showPhraseList,  setShowPhraseList]  = useState(false);
   const [customPhrase,    setCustomPhrase]    = useState('');
+  const [previewing,      setPreviewing]      = useState(false);
   const [previewInput,    setPreviewInput]    = useState('');
+  const [typedCount,      setTypedCount]      = useState(0);
   const [previewDone,     setPreviewDone]     = useState(false);
+  const previewTimers                          = useRef<number[]>([]);
+  const previewRef                             = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { previewTimers.current.forEach(clearTimeout); previewTimers.current = []; }, []);
+
+  // Autofocus the input (and therefore the OS keyboard) only inside preview.
+  useEffect(() => {
+    if (!previewing) return;
+    const id = window.setTimeout(() => previewRef.current?.focus(), 120);
+    return () => clearTimeout(id);
+  }, [previewing]);
+
+  const exitPreview = () => {
+    previewTimers.current.forEach(clearTimeout);
+    previewTimers.current = [];
+    setPreviewing(false);
+    setPreviewInput('');
+    setTypedCount(0);
+    setPreviewDone(false);
+  };
 
   const handlePreviewType = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setPreviewInput(v);
-    if (v.toLowerCase() === phrase.toLowerCase()) {
-      setPreviewDone(true);
-      toast.success('Correct! ✓');
-      setTimeout(() => { setPreviewInput(''); setPreviewDone(false); }, 800);
+    // 'hard' requires exact case; easier levels are case-insensitive.
+    const match = difficulty === 'hard' ? v === phrase : v.toLowerCase() === phrase.toLowerCase();
+    if (!match) return;
+    void successNotification();
+    const done = typedCount + 1;
+    setTypedCount(done);
+    setPreviewDone(true);
+    if (done >= count) {
+      toast.success('Preview complete — alarm would dismiss ✓');
+      previewTimers.current.push(window.setTimeout(exitPreview, 700));
+    } else {
+      toast.success(`Correct! ${done}/${count}`);
+      previewTimers.current.push(window.setTimeout(() => { setPreviewInput(''); setPreviewDone(false); }, 500));
     }
   };
 
@@ -594,8 +735,13 @@ function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; on
                 className="flex-1 bg-white/10 text-white rounded-xl px-4 py-3 text-sm outline-none border border-white/10 focus:border-cyan-400"
               />
               <button
-                onClick={() => { if (customPhrase.trim()) { setPhrase(customPhrase.trim()); setShowPhraseList(false); } }}
-                className="px-4 py-3 bg-cyan-500 text-black rounded-xl font-bold text-sm"
+                onClick={() => {
+                  if (!customPhrase.trim()) { toast.error('Type a phrase first'); return; }
+                  void mediumImpact();
+                  setPhrase(customPhrase.trim());
+                  setShowPhraseList(false);
+                }}
+                className="px-4 py-3 bg-cyan-500 text-black rounded-xl font-bold text-sm active:scale-95 transition-transform"
               >
                 Use
               </button>
@@ -605,9 +751,9 @@ function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; on
           {PRESET_PHRASES.map((p) => (
             <button
               key={p}
-              onClick={() => { setPhrase(p); setShowPhraseList(false); }}
+              onClick={() => { void lightImpact(); setPhrase(p); setShowPhraseList(false); }}
               className={cn(
-                'w-full text-left px-4 py-4 rounded-xl text-base font-medium transition-colors',
+                'w-full text-left px-4 py-4 rounded-xl text-base font-medium transition-colors active:scale-[0.99]',
                 phrase === p ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-white/5 text-white hover:bg-white/10',
               )}
             >
@@ -620,52 +766,72 @@ function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; on
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0E1117]">
+    <div className="relative flex flex-col h-full bg-[#0E1117]">
       <ConfigHeader title="Typing" onClose={onClose} />
 
+      {/* SETUP — read-only example, no text field so the keyboard stays closed */}
       <div className="flex-1 flex flex-col px-4 gap-4 overflow-auto pt-2">
-
-        {/* Live preview */}
         <div className="bg-[#1A1D26] rounded-2xl p-5 flex flex-col gap-3">
-          <div className="flex items-center justify-center">
+          <div className="flex items-center justify-center gap-2">
+            <Type className="h-4 w-4 text-cyan-400" />
             <span className="bg-cyan-500 text-black text-xs font-bold px-3 py-1.5 rounded-full">Example</span>
           </div>
           <p className="text-white text-2xl font-bold text-center">{phrase}</p>
-          <input
-            placeholder="Type the phrase here..."
-            value={previewInput}
-            onChange={handlePreviewType}
-            className={cn(
-              'w-full rounded-xl px-4 py-3 text-base outline-none border-2 transition-colors bg-white/5 text-white',
-              previewDone ? 'border-green-400' : previewInput ? 'border-cyan-400' : 'border-white/10',
-            )}
-          />
-          <p className="text-white/30 text-xs text-center">Try typing the phrase above</p>
+          <p className="text-white/40 text-sm text-center">
+            Type it {count} {count === 1 ? 'time' : 'times'} to dismiss the alarm
+          </p>
         </div>
 
-        {/* Count */}
+        <DifficultySlider value={difficulty} onChange={setDifficulty} />
         <CountPicker value={count} onChange={setCount} max={5} label="times" />
 
-        {/* Select phrase */}
         <button
-          onClick={() => setShowPhraseList(true)}
-          className="w-full flex items-center justify-between bg-white/5 rounded-xl px-4 py-4"
+          onClick={() => { void lightImpact(); setShowPhraseList(true); }}
+          className="w-full flex items-center justify-between bg-white/5 rounded-xl px-4 py-4 active:scale-[0.99] transition-transform"
         >
           <span className="text-white font-medium">Select phrase</span>
           <div className="flex items-center gap-2">
             <span className="text-cyan-400 text-sm">{PRESET_PHRASES.length} phrases</span>
+            <ChevronRight className="h-4 w-4 text-white/30" />
           </div>
         </button>
       </div>
 
       <ActionButtons
-        onPreview={() => { setPreviewInput(''); toast.info('Try typing: ' + phrase); }}
+        onPreview={() => { setTypedCount(0); setPreviewInput(''); setPreviewDone(false); setPreviewing(true); }}
         onComplete={() => {
-          onSave({ ...value, typingPhrase: phrase, count });
+          onSave({ ...value, typingPhrase: phrase, count, difficulty });
           toast.success('Typing mission configured ✓');
           onClose();
         }}
       />
+
+      {/* PREVIEW — full-screen challenge, keyboard opens here only */}
+      {previewing && (
+        <PreviewShell title="Typing challenge" onExit={exitPreview}>
+          <div className="flex-1 flex flex-col justify-center px-5 pb-[max(env(safe-area-inset-bottom),1rem)]">
+            <p className="text-white/40 text-center text-xs mb-3">{typedCount}/{count} typed</p>
+            <p className="text-white text-3xl font-bold text-center mb-6 leading-snug">{phrase}</p>
+            <input
+              ref={previewRef}
+              placeholder="Type the phrase here..."
+              value={previewInput}
+              onChange={handlePreviewType}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className={cn(
+                'w-full rounded-2xl px-4 py-4 text-lg outline-none border-2 transition-colors bg-white/5 text-white',
+                previewDone ? 'border-green-400' : previewInput ? 'border-cyan-400' : 'border-white/10',
+              )}
+            />
+            <p className="text-white/30 text-xs text-center mt-3">
+              {difficulty === 'hard' ? 'Exact capitalisation required' : 'Capitalisation ignored'}
+            </p>
+          </div>
+        </PreviewShell>
+      )}
     </div>
+
   );
 }
