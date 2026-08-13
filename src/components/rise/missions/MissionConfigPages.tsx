@@ -366,6 +366,8 @@ function MathConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSa
       )}
     </div>
   );
+}
+
 
 
 /* ══════════════════════════════════════════════════════════
