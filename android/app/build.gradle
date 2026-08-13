@@ -14,8 +14,8 @@ android {
         minSdk 24
         targetSdk 35
         // Hardcoded release version — CI overrides are intentionally ignored
-        versionCode 20
-        versionName "1.0.20"
+        versionCode 3473499
+        versionName "1.0.21"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
     compileOptions {
