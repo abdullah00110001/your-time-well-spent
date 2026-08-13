@@ -671,19 +671,51 @@ const PRESET_PHRASES = [
 
 function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; onSave: (c: MissionConfig) => void; onClose: () => void }) {
   const [phrase,          setPhrase]          = useState(value.typingPhrase ?? PRESET_PHRASES[0]);
+  const [difficulty,      setDifficulty]      = useState<MissionDifficulty>(value.difficulty ?? 'easy');
   const [count,           setCount]           = useState(value.count ?? 1);
   const [showPhraseList,  setShowPhraseList]  = useState(false);
   const [customPhrase,    setCustomPhrase]    = useState('');
+  const [previewing,      setPreviewing]      = useState(false);
   const [previewInput,    setPreviewInput]    = useState('');
+  const [typedCount,      setTypedCount]      = useState(0);
   const [previewDone,     setPreviewDone]     = useState(false);
+  const previewTimers                          = useRef<number[]>([]);
+  const previewRef                             = useRef<HTMLInputElement>(null);
+
+  useEffect(() => () => { previewTimers.current.forEach(clearTimeout); previewTimers.current = []; }, []);
+
+  // Autofocus the input (and therefore the OS keyboard) only inside preview.
+  useEffect(() => {
+    if (!previewing) return;
+    const id = window.setTimeout(() => previewRef.current?.focus(), 120);
+    return () => clearTimeout(id);
+  }, [previewing]);
+
+  const exitPreview = () => {
+    previewTimers.current.forEach(clearTimeout);
+    previewTimers.current = [];
+    setPreviewing(false);
+    setPreviewInput('');
+    setTypedCount(0);
+    setPreviewDone(false);
+  };
 
   const handlePreviewType = (e: React.ChangeEvent<HTMLInputElement>) => {
     const v = e.target.value;
     setPreviewInput(v);
-    if (v.toLowerCase() === phrase.toLowerCase()) {
-      setPreviewDone(true);
-      toast.success('Correct! ✓');
-      setTimeout(() => { setPreviewInput(''); setPreviewDone(false); }, 800);
+    // 'hard' requires exact case; easier levels are case-insensitive.
+    const match = difficulty === 'hard' ? v === phrase : v.toLowerCase() === phrase.toLowerCase();
+    if (!match) return;
+    void successNotification();
+    const done = typedCount + 1;
+    setTypedCount(done);
+    setPreviewDone(true);
+    if (done >= count) {
+      toast.success('Preview complete — alarm would dismiss ✓');
+      previewTimers.current.push(window.setTimeout(exitPreview, 700));
+    } else {
+      toast.success(`Correct! ${done}/${count}`);
+      previewTimers.current.push(window.setTimeout(() => { setPreviewInput(''); setPreviewDone(false); }, 500));
     }
   };
 
@@ -703,8 +735,13 @@ function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; on
                 className="flex-1 bg-white/10 text-white rounded-xl px-4 py-3 text-sm outline-none border border-white/10 focus:border-cyan-400"
               />
               <button
-                onClick={() => { if (customPhrase.trim()) { setPhrase(customPhrase.trim()); setShowPhraseList(false); } }}
-                className="px-4 py-3 bg-cyan-500 text-black rounded-xl font-bold text-sm"
+                onClick={() => {
+                  if (!customPhrase.trim()) { toast.error('Type a phrase first'); return; }
+                  void mediumImpact();
+                  setPhrase(customPhrase.trim());
+                  setShowPhraseList(false);
+                }}
+                className="px-4 py-3 bg-cyan-500 text-black rounded-xl font-bold text-sm active:scale-95 transition-transform"
               >
                 Use
               </button>
@@ -714,9 +751,9 @@ function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; on
           {PRESET_PHRASES.map((p) => (
             <button
               key={p}
-              onClick={() => { setPhrase(p); setShowPhraseList(false); }}
+              onClick={() => { void lightImpact(); setPhrase(p); setShowPhraseList(false); }}
               className={cn(
-                'w-full text-left px-4 py-4 rounded-xl text-base font-medium transition-colors',
+                'w-full text-left px-4 py-4 rounded-xl text-base font-medium transition-colors active:scale-[0.99]',
                 phrase === p ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40' : 'bg-white/5 text-white hover:bg-white/10',
               )}
             >
@@ -729,52 +766,72 @@ function TypingConfigPage({ value, onSave, onClose }: { value: MissionConfig; on
   }
 
   return (
-    <div className="flex flex-col h-full bg-[#0E1117]">
+    <div className="relative flex flex-col h-full bg-[#0E1117]">
       <ConfigHeader title="Typing" onClose={onClose} />
 
+      {/* SETUP — read-only example, no text field so the keyboard stays closed */}
       <div className="flex-1 flex flex-col px-4 gap-4 overflow-auto pt-2">
-
-        {/* Live preview */}
         <div className="bg-[#1A1D26] rounded-2xl p-5 flex flex-col gap-3">
-          <div className="flex items-center justify-center">
+          <div className="flex items-center justify-center gap-2">
+            <Type className="h-4 w-4 text-cyan-400" />
             <span className="bg-cyan-500 text-black text-xs font-bold px-3 py-1.5 rounded-full">Example</span>
           </div>
           <p className="text-white text-2xl font-bold text-center">{phrase}</p>
-          <input
-            placeholder="Type the phrase here..."
-            value={previewInput}
-            onChange={handlePreviewType}
-            className={cn(
-              'w-full rounded-xl px-4 py-3 text-base outline-none border-2 transition-colors bg-white/5 text-white',
-              previewDone ? 'border-green-400' : previewInput ? 'border-cyan-400' : 'border-white/10',
-            )}
-          />
-          <p className="text-white/30 text-xs text-center">Try typing the phrase above</p>
+          <p className="text-white/40 text-sm text-center">
+            Type it {count} {count === 1 ? 'time' : 'times'} to dismiss the alarm
+          </p>
         </div>
 
-        {/* Count */}
+        <DifficultySlider value={difficulty} onChange={setDifficulty} />
         <CountPicker value={count} onChange={setCount} max={5} label="times" />
 
-        {/* Select phrase */}
         <button
-          onClick={() => setShowPhraseList(true)}
-          className="w-full flex items-center justify-between bg-white/5 rounded-xl px-4 py-4"
+          onClick={() => { void lightImpact(); setShowPhraseList(true); }}
+          className="w-full flex items-center justify-between bg-white/5 rounded-xl px-4 py-4 active:scale-[0.99] transition-transform"
         >
           <span className="text-white font-medium">Select phrase</span>
           <div className="flex items-center gap-2">
             <span className="text-cyan-400 text-sm">{PRESET_PHRASES.length} phrases</span>
+            <ChevronRight className="h-4 w-4 text-white/30" />
           </div>
         </button>
       </div>
 
       <ActionButtons
-        onPreview={() => { setPreviewInput(''); toast.info('Try typing: ' + phrase); }}
+        onPreview={() => { setTypedCount(0); setPreviewInput(''); setPreviewDone(false); setPreviewing(true); }}
         onComplete={() => {
-          onSave({ ...value, typingPhrase: phrase, count });
+          onSave({ ...value, typingPhrase: phrase, count, difficulty });
           toast.success('Typing mission configured ✓');
           onClose();
         }}
       />
+
+      {/* PREVIEW — full-screen challenge, keyboard opens here only */}
+      {previewing && (
+        <PreviewShell title="Typing challenge" onExit={exitPreview}>
+          <div className="flex-1 flex flex-col justify-center px-5 pb-[max(env(safe-area-inset-bottom),1rem)]">
+            <p className="text-white/40 text-center text-xs mb-3">{typedCount}/{count} typed</p>
+            <p className="text-white text-3xl font-bold text-center mb-6 leading-snug">{phrase}</p>
+            <input
+              ref={previewRef}
+              placeholder="Type the phrase here..."
+              value={previewInput}
+              onChange={handlePreviewType}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className={cn(
+                'w-full rounded-2xl px-4 py-4 text-lg outline-none border-2 transition-colors bg-white/5 text-white',
+                previewDone ? 'border-green-400' : previewInput ? 'border-cyan-400' : 'border-white/10',
+              )}
+            />
+            <p className="text-white/30 text-xs text-center mt-3">
+              {difficulty === 'hard' ? 'Exact capitalisation required' : 'Capitalisation ignored'}
+            </p>
+          </div>
+        </PreviewShell>
+      )}
     </div>
+
   );
 }
