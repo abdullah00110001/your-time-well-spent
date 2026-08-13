@@ -57,27 +57,37 @@ export function MissionConfigRouter({ missionId, value, onSave, onClose }: Route
 
 /* ─── Shared primitives ─────────────────────────────────── */
 
+/**
+ * Single close/back control only — the previous version rendered an extra `X`
+ * on the right which duplicated the left control and confused users.
+ */
 function ConfigHeader({ title, onBack, onClose }: { title: string; onBack?: () => void; onClose: () => void }) {
+  const handle = () => { void lightImpact(); (onBack ?? onClose)(); };
   return (
-    <div className="flex items-center justify-between px-4 py-4 shrink-0">
-      <button onClick={onBack ?? onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10">
+    <div className="flex items-center gap-3 px-4 py-4 shrink-0">
+      <button
+        onClick={handle}
+        aria-label={onBack ? 'Back' : 'Close'}
+        className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 active:scale-95 transition-transform"
+      >
         {onBack ? <ArrowLeft className="h-5 w-5 text-white" /> : <X className="h-5 w-5 text-white" />}
       </button>
       <span className="text-white font-bold text-base">{title}</span>
-      <button onClick={onClose} className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10">
-        <X className="h-5 w-5 text-white" />
-      </button>
     </div>
   );
 }
 
 // Scroll wheel picker — 1..max
 function CountPicker({ value, onChange, max = 10, label = 'times' }: { value: number; onChange: (n: number) => void; max?: number; label?: string }) {
-  const items = Array.from({ length: max }, (_, i) => i + 1);
+  const step = (n: number) => { void selectionChanged(); onChange(n); };
   return (
     <div className="flex items-center justify-center gap-8 bg-white/5 rounded-2xl py-4">
       <div className="flex flex-col items-center w-28">
-        <button onClick={() => onChange(Math.max(1, value - 1))} className="p-2">
+        <button
+          onClick={() => step(Math.max(1, value - 1))}
+          aria-label="Decrease"
+          className="p-2 active:scale-90 transition-transform"
+        >
           <ChevronUp className="h-5 w-5 text-white/40" />
         </button>
         <div className="relative h-24 overflow-hidden w-full flex flex-col items-center">
@@ -97,7 +107,11 @@ function CountPicker({ value, onChange, max = 10, label = 'times' }: { value: nu
             );
           })}
         </div>
-        <button onClick={() => onChange(Math.min(max, value + 1))} className="p-2">
+        <button
+          onClick={() => step(Math.min(max, value + 1))}
+          aria-label="Increase"
+          className="p-2 active:scale-90 transition-transform"
+        >
           <ChevronDown className="h-5 w-5 text-white/40" />
         </button>
       </div>
@@ -106,12 +120,13 @@ function CountPicker({ value, onChange, max = 10, label = 'times' }: { value: nu
   );
 }
 
-// Difficulty slider
+// Difficulty slider — the only place difficulty is configured (removed from the alarm editor summary)
 function DifficultySlider({ value, onChange }: { value: MissionDifficulty; onChange: (d: MissionDifficulty) => void }) {
   const levels: MissionDifficulty[] = ['easy', 'medium', 'hard'];
   const idx = levels.indexOf(value);
   return (
     <div className="bg-white/5 rounded-2xl p-4">
+      <p className="text-white/40 text-[11px] uppercase tracking-wider text-center">Difficulty</p>
       <p className="text-white font-bold text-center text-xl mb-4 capitalize">{value}</p>
       <div className="relative px-2">
         <div className="h-1.5 bg-white/10 rounded-full" />
@@ -124,7 +139,8 @@ function DifficultySlider({ value, onChange }: { value: MissionDifficulty; onCha
           min={0}
           max={2}
           value={idx}
-          onChange={(e) => onChange(levels[parseInt(e.target.value)])}
+          aria-label="Difficulty"
+          onChange={(e) => { void selectionChanged(); onChange(levels[parseInt(e.target.value)]); }}
           className="absolute inset-0 opacity-0 w-full cursor-pointer"
         />
         {/* thumb */}
@@ -147,21 +163,48 @@ function ActionButtons({ onPreview, onComplete, previewLabel = 'Preview' }: { on
     <div className="flex gap-3 px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3 shrink-0">
       {onPreview && (
         <button
-          onClick={onPreview}
-          className="flex-1 h-14 rounded-2xl bg-white/10 text-white font-bold text-base"
+          onClick={() => { void lightImpact(); onPreview(); }}
+          className="flex-1 h-14 rounded-2xl bg-white/10 text-white font-bold text-base active:scale-[0.98] transition-transform"
         >
           {previewLabel}
         </button>
       )}
       <button
-        onClick={onComplete}
-        className="flex-1 h-14 rounded-2xl bg-white text-black font-bold text-base"
+        onClick={() => { void mediumImpact(); onComplete(); }}
+        className="flex-1 h-14 rounded-2xl bg-white text-black font-bold text-base active:scale-[0.98] transition-transform"
       >
         Complete
       </button>
     </div>
   );
 }
+
+/**
+ * Full-screen mission PREVIEW — this is the only place a keypad / typing input
+ * is shown. The setup screens stay clean (no live keyboard), matching the real
+ * alarm-ring experience.
+ */
+function PreviewShell({ title, onExit, children }: { title: string; onExit: () => void; children: React.ReactNode }) {
+  return (
+    <div className="absolute inset-0 z-10 flex flex-col bg-[#07090F]">
+      <div className="flex items-center gap-3 px-4 py-4 shrink-0 pt-[max(env(safe-area-inset-top),1rem)]">
+        <button
+          onClick={() => { void lightImpact(); onExit(); }}
+          aria-label="Exit preview"
+          className="w-9 h-9 flex items-center justify-center rounded-full bg-white/10 active:scale-95 transition-transform"
+        >
+          <X className="h-5 w-5 text-white" />
+        </button>
+        <div>
+          <p className="text-white font-bold text-base leading-tight">{title}</p>
+          <p className="text-white/40 text-[11px]">Preview — how it looks when the alarm rings</p>
+        </div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
 
 /* ══════════════════════════════════════════════════════════
    1. MATH CONFIG
