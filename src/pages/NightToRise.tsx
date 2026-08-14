@@ -50,7 +50,7 @@ export default function NightToRisePage() {
   const riseAlarmTime = readNextAlarm();
   const { config, update, status, pauseTonight, canPauseTonight } = useNightToRise(riseAlarmTime);
   const { streak } = useNightToRiseStreak();
-  const [newApp, setNewApp] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const toggleDay = (d: number) => {
     const set = new Set(config.scheduleDays);
@@ -58,14 +58,6 @@ export default function NightToRisePage() {
     update({ scheduleDays: Array.from(set).sort() });
   };
 
-  const addApp = () => {
-    const name = newApp.trim();
-    if (!name) return;
-    const app: AllowedApp = { id: name.toLowerCase().replace(/\s+/g, '-'), name };
-    if (config.allowedApps.some((a) => a.id === app.id)) { setNewApp(''); return; }
-    update({ allowedApps: [...config.allowedApps, app] });
-    setNewApp('');
-  };
 
   const removeApp = (id: string) =>
     update({ allowedApps: config.allowedApps.filter((a) => a.id !== id) });
