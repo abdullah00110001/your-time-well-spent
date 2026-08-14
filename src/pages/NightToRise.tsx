@@ -28,6 +28,8 @@ import { useNightToRiseStreak } from '@/components/rise/night-to-rise/useNightTo
 import { NightArc } from '@/components/rise/night-to-rise/NightArc';
 import { NightToRiseBlocklist } from '@/components/rise/night-to-rise/NightToRiseBlocklist';
 import { NightToRiseInsights } from '@/components/rise/night-to-rise/NightToRiseInsights';
+import { InstalledAppPicker } from '@/components/rise/night-to-rise/InstalledAppPicker';
+import { NightToRisePermissions } from '@/components/rise/night-to-rise/NightToRisePermissions';
 import { ALWAYS_ALLOWED_IDS, MAX_PAUSES_PER_WEEK, type AllowedApp } from '@/components/rise/night-to-rise/types';
 import { isNative } from '@/lib/capacitor/platform';
 import { OfflineBadge } from '@/components/OfflineGuard';
