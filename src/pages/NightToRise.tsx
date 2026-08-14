@@ -197,20 +197,28 @@ export default function NightToRisePage() {
                       );
                     })}
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Add app name (e.g. Spotify)"
-                      value={newApp}
-                      onChange={(e) => setNewApp(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && addApp()}
-                    />
-                    <Button size="icon" onClick={addApp} aria-label="Add app"><Plus className="h-4 w-4" /></Button>
-                  </div>
+                  <Button variant="outline" className="w-full" onClick={() => setPickerOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" /> Choose apps from your phone
+                  </Button>
                   <p className="text-[11px] text-muted-foreground">
                     Phone, Clock and Emergency stay reachable at all times — they can't be removed.
                   </p>
                 </div>
               </Section>
+
+              <Section icon={<ShieldCheck className="h-4 w-4" />} title="Permissions" subtitle="Required for real app blocking">
+                <NightToRisePermissions />
+              </Section>
+
+              <InstalledAppPicker
+                open={pickerOpen}
+                title="Allowed apps"
+                selected={config.allowedApps.map((a) => a.id)}
+                lockedIds={ALWAYS_ALLOWED_IDS}
+                onClose={() => setPickerOpen(false)}
+                onSave={(apps) => update({ allowedApps: apps })}
+              />
+
 
               <Section icon={<MessageSquare className="h-4 w-4" />} title="Block Screen" subtitle="What you'll read when the lock appears">
                 <div className="space-y-3">
