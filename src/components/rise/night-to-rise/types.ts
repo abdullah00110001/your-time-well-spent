@@ -72,12 +72,11 @@ export const DEFAULT_CONFIG: NightToRiseConfig = {
   sleepLockMinutesBefore: 30,
   riseLockMinutesAfter: 30,
   allowedApps: [
-    { id: 'com.android.phone', name: 'Phone' },
-    { id: 'com.android.clock', name: 'Clock' },
-    { id: 'com.android.camera', name: 'Camera' },
-    { id: 'quran', name: 'Quran' },
-    { id: 'notes', name: 'Notes' },
+    { id: 'com.android.dialer', name: 'Phone' },
+    { id: 'com.android.deskclock', name: 'Clock' },
+    { id: 'com.google.android.deskclock', name: 'Clock (Google)' },
   ],
+
   blockedApps: SUGGESTED_BLOCK_APPS.slice(0, 4),
   blockedSites: [],
   blockedKeywords: [],
