@@ -72,12 +72,11 @@ export const DEFAULT_CONFIG: NightToRiseConfig = {
   sleepLockMinutesBefore: 30,
   riseLockMinutesAfter: 30,
   allowedApps: [
-    { id: 'com.android.phone', name: 'Phone' },
-    { id: 'com.android.clock', name: 'Clock' },
-    { id: 'com.android.camera', name: 'Camera' },
-    { id: 'quran', name: 'Quran' },
-    { id: 'notes', name: 'Notes' },
+    { id: 'com.android.dialer', name: 'Phone' },
+    { id: 'com.android.deskclock', name: 'Clock' },
+    { id: 'com.google.android.deskclock', name: 'Clock (Google)' },
   ],
+
   blockedApps: SUGGESTED_BLOCK_APPS.slice(0, 4),
   blockedSites: [],
   blockedKeywords: [],
@@ -98,7 +97,16 @@ export const DEFAULT_CONFIG: NightToRiseConfig = {
  * Apps that can never be blocked, for user safety. Enforced in the UI so a
  * user can't lock themselves out of calls or the alarm clock.
  */
-export const ALWAYS_ALLOWED_IDS = ['com.android.phone', 'com.android.dialer', 'com.android.clock'];
+export const ALWAYS_ALLOWED_IDS = [
+  'com.android.phone',
+  'com.android.dialer',
+  'com.google.android.dialer',
+  'com.android.server.telecom',
+  'com.android.emergency',
+  'com.android.deskclock',
+  'com.google.android.deskclock',
+];
+
 
 export const STORAGE_KEY = 'night_to_rise_config_v1';
 

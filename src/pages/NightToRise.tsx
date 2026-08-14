@@ -28,6 +28,8 @@ import { useNightToRiseStreak } from '@/components/rise/night-to-rise/useNightTo
 import { NightArc } from '@/components/rise/night-to-rise/NightArc';
 import { NightToRiseBlocklist } from '@/components/rise/night-to-rise/NightToRiseBlocklist';
 import { NightToRiseInsights } from '@/components/rise/night-to-rise/NightToRiseInsights';
+import { InstalledAppPicker } from '@/components/rise/night-to-rise/InstalledAppPicker';
+import { NightToRisePermissions } from '@/components/rise/night-to-rise/NightToRisePermissions';
 import { ALWAYS_ALLOWED_IDS, MAX_PAUSES_PER_WEEK, type AllowedApp } from '@/components/rise/night-to-rise/types';
 import { isNative } from '@/lib/capacitor/platform';
 import { OfflineBadge } from '@/components/OfflineGuard';
@@ -48,7 +50,7 @@ export default function NightToRisePage() {
   const riseAlarmTime = readNextAlarm();
   const { config, update, status, pauseTonight, canPauseTonight } = useNightToRise(riseAlarmTime);
   const { streak } = useNightToRiseStreak();
-  const [newApp, setNewApp] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const toggleDay = (d: number) => {
     const set = new Set(config.scheduleDays);
@@ -56,14 +58,6 @@ export default function NightToRisePage() {
     update({ scheduleDays: Array.from(set).sort() });
   };
 
-  const addApp = () => {
-    const name = newApp.trim();
-    if (!name) return;
-    const app: AllowedApp = { id: name.toLowerCase().replace(/\s+/g, '-'), name };
-    if (config.allowedApps.some((a) => a.id === app.id)) { setNewApp(''); return; }
-    update({ allowedApps: [...config.allowedApps, app] });
-    setNewApp('');
-  };
 
   const removeApp = (id: string) =>
     update({ allowedApps: config.allowedApps.filter((a) => a.id !== id) });
@@ -197,20 +191,28 @@ export default function NightToRisePage() {
                       );
                     })}
                   </div>
-                  <div className="flex gap-2">
-                    <Input
-                      placeholder="Add app name (e.g. Spotify)"
-                      value={newApp}
-                      onChange={(e) => setNewApp(e.target.value)}
-                      onKeyDown={(e) => e.key === 'Enter' && addApp()}
-                    />
-                    <Button size="icon" onClick={addApp} aria-label="Add app"><Plus className="h-4 w-4" /></Button>
-                  </div>
+                  <Button variant="outline" className="w-full" onClick={() => setPickerOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" /> Choose apps from your phone
+                  </Button>
                   <p className="text-[11px] text-muted-foreground">
                     Phone, Clock and Emergency stay reachable at all times — they can't be removed.
                   </p>
                 </div>
               </Section>
+
+              <Section icon={<ShieldCheck className="h-4 w-4" />} title="Permissions" subtitle="Required for real app blocking">
+                <NightToRisePermissions />
+              </Section>
+
+              <InstalledAppPicker
+                open={pickerOpen}
+                title="Allowed apps"
+                selected={config.allowedApps.map((a) => a.id)}
+                lockedIds={ALWAYS_ALLOWED_IDS}
+                onClose={() => setPickerOpen(false)}
+                onSave={(apps) => update({ allowedApps: apps })}
+              />
+
 
               <Section icon={<MessageSquare className="h-4 w-4" />} title="Block Screen" subtitle="What you'll read when the lock appears">
                 <div className="space-y-3">
