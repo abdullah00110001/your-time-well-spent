@@ -49,4 +49,20 @@ public class NightToRisePlugin extends Plugin {
         ret.put("broke", broke);
         call.resolve(ret);
     }
+
+    /** Safety valve status: tripped = native auto-disabled after a block-screen loop. */
+    @PluginMethod
+    public void getSafetyStatus(PluginCall call) {
+        NightToRisePreferences p = new NightToRisePreferences(getContext());
+        JSObject ret = new JSObject();
+        ret.put("tripped", p.isSafeModeTripped());
+        ret.put("trippedAt", p.safeModeTrippedAt());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void clearSafeMode(PluginCall call) {
+        new NightToRisePreferences(getContext()).clearSafeMode();
+        call.resolve();
+    }
 }
