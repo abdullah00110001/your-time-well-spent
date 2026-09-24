@@ -177,6 +177,17 @@ public class NightToRisePreferences {
         sp.edit().putLong(K_PENDING_BREAK_TS, System.currentTimeMillis()).apply();
     }
 
+    // ==========================================================
+    // Safety valve: persisted "safe mode" after a launch storm
+    // ==========================================================
+    private static final String K_SAFE_MODE_TS = "safeModeTrippedAt";
+
+    public boolean isSafeModeTripped() { return sp.getLong(K_SAFE_MODE_TS, 0L) > 0L; }
+    public long safeModeTrippedAt()    { return sp.getLong(K_SAFE_MODE_TS, 0L); }
+    /** commit() (synchronous) so the flag survives an immediate crash/restart. */
+    public void tripSafeMode()         { sp.edit().putLong(K_SAFE_MODE_TS, System.currentTimeMillis()).commit(); }
+    public void clearSafeMode()        { sp.edit().remove(K_SAFE_MODE_TS).apply(); }
+
     /**
      * Called by NightToRisePlugin.consumePendingBreak() when JS resumes.
      * Returns true (and clears the flag) exactly once per break event.

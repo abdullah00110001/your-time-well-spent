@@ -126,6 +126,15 @@ public class NightToRiseBlockActivity extends Activity {
         });
     }
 
+    /** singleTask: re-launches reuse this instance instead of stacking new windows. */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String message = intent.getStringExtra(EXTRA_MESSAGE);
+        if (message != null) ((TextView) findViewById(R.id.n2r_message)).setText(message);
+    }
+
     @Override public void onBackPressed() { /* swallow */ }
 
     @Override

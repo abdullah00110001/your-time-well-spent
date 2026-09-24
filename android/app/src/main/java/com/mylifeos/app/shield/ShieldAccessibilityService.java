@@ -211,29 +211,12 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
         int type = event.getEventType();
 
-        // Night to Rise
+        // Night to Rise — single guarded entry point (never blocks system UI /
+        // launcher / keyboard / dialer, rate-limited, auto safe-mode on loops).
+        // If it consumes the event, Shield does not also launch a block screen.
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             try {
-                com.mylifeos.app.nighttorise.NightToRiseManager n2r =
-                    new com.mylifeos.app.nighttorise.NightToRiseManager(this);
-                com.mylifeos.app.nighttorise.NightToRiseManager.Decision d =
-                    n2r.decide(System.currentTimeMillis(), packageName);
-                if (d.shouldBlock) {
-                    Intent i = new Intent(this,
-                        com.mylifeos.app.nighttorise.NightToRiseBlockActivity.class);
-                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                    i.putExtra(com.mylifeos.app.nighttorise.NightToRiseBlockActivity.EXTRA_MESSAGE, d.message);
-                    i.putExtra(com.mylifeos.app.nighttorise.NightToRiseBlockActivity.EXTRA_END_MS, d.endTimeMs);
-                    i.putExtra(com.mylifeos.app.nighttorise.NightToRiseBlockActivity.EXTRA_STRICT, n2r.prefs().strictMode());
-                    startActivity(i);
-                    return;
-                }
-                // Lock window is over — drop any pending strict-unlock request.
-                if (n2r.prefs().strictUnlockRequestedAt() > 0
-                    && d.phase != com.mylifeos.app.nighttorise.NightToRiseManager.Phase.SLEEP_LOCK
-                    && d.phase != com.mylifeos.app.nighttorise.NightToRiseManager.Phase.RISE_LOCK) {
-                    n2r.prefs().clearStrictUnlockRequest();
-                }
+                if (com.mylifeos.app.nighttorise.NightToRiseEnforcer.get(this).onForegroundApp(packageName)) return;
             } catch (Throwable t) { Log.w(TAG, "NightToRise check failed", t); }
         }
 
@@ -407,27 +390,15 @@ public class ShieldAccessibilityService extends AccessibilityService {
     // ==========================================
     private boolean checkNightToRiseUrl(String url) {
         try {
-            com.mylifeos.app.nighttorise.NightToRiseManager n2r =
-                new com.mylifeos.app.nighttorise.NightToRiseManager(this);
-            com.mylifeos.app.nighttorise.NightToRiseManager.Decision d =
-                n2r.decide(System.currentTimeMillis(), null);
-            if (d.phase != com.mylifeos.app.nighttorise.NightToRiseManager.Phase.SLEEP_LOCK
-                && d.phase != com.mylifeos.app.nighttorise.NightToRiseManager.Phase.RISE_LOCK) return false;
-
+            com.mylifeos.app.nighttorise.NightToRiseEnforcer enf =
+                com.mylifeos.app.nighttorise.NightToRiseEnforcer.get(this);
+            if (!enf.isLockActive(System.currentTimeMillis())) return false;
             String host = extractDomain(url);
-            boolean hit = ContentMatcher.matchesDomain(host, n2r.prefs().blockedSites());
-            if (!hit) {
-                hit = ContentMatcher.matchesKeyword(url, n2r.prefs().blockedKeywords());
-            }
-            if (!hit) return false;
-
+            com.mylifeos.app.nighttorise.NightToRisePreferences p = enf.manager().prefs();
+            boolean domainHit = ContentMatcher.matchesDomain(host, p.blockedSites());
+            boolean keywordHit = !domainHit && ContentMatcher.matchesKeyword(url, p.blockedKeywords());
+            if (!enf.onUrl(url, host, domainHit, keywordHit)) return false;
             lastBlockedUrl = url;
-            Intent i = new Intent(this, com.mylifeos.app.nighttorise.NightToRiseBlockActivity.class);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            i.putExtra(com.mylifeos.app.nighttorise.NightToRiseBlockActivity.EXTRA_MESSAGE, d.message);
-            i.putExtra(com.mylifeos.app.nighttorise.NightToRiseBlockActivity.EXTRA_END_MS, d.endTimeMs);
-            i.putExtra(com.mylifeos.app.nighttorise.NightToRiseBlockActivity.EXTRA_STRICT, n2r.prefs().strictMode());
-            startActivity(i);
             resetLastBlockedUrl();
             return true;
         } catch (Throwable t) {
