@@ -18,9 +18,6 @@ public class ShieldPreferences {
         prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
     }
 
-    // ==========================================
-    // 🛡️ Basic Shield Toggles
-    // ==========================================
     public boolean isEnabled() {
         return prefs.getBoolean("is_enabled", false);
     }
@@ -29,14 +26,15 @@ public class ShieldPreferences {
         prefs.edit().putBoolean("is_enabled", enabled).apply();
     }
 
-    /**
-     * FIX (app blocking was inconsistent): SharedPreferences.getStringSet()
-     * hands back the set instance it caches internally. Callers were mutating
-     * and re-saving that very instance, which Android treats as "unchanged"
-     * (the new value == the cached value), so some writes never hit disk and
-     * readers saw a half-updated list. Every getter now returns a defensive
-     * copy and every setter stores a brand-new set.
-     */
+    public Set<String> getAllowedApps() {
+        return readSet("allowed_apps");
+    }
+
+    public void setAllowedApps(Set<String> apps) {
+        writeSet("allowed_apps", apps);
+    }
+
+    /** Back-compat alias: legacy code may still read the old key. */
     public Set<String> getBlockedApps() {
         return readSet("blocked_apps");
     }
@@ -60,15 +58,10 @@ public class ShieldPreferences {
 
     private void writeSet(String key, Set<String> values) {
         Set<String> copy = values == null ? new HashSet<>() : new HashSet<>(values);
-        // remove() first so the platform can never short-circuit the write by
-        // comparing the new value against the identical cached instance.
         prefs.edit().remove(key).apply();
         prefs.edit().putStringSet(key, copy).apply();
     }
 
-    // ==========================================
-    // 🧠 Modes & Strict Mode
-    // ==========================================
     public boolean isStrictMode() {
         return prefs.getBoolean("strict_mode", false);
     }
@@ -85,9 +78,6 @@ public class ShieldPreferences {
         prefs.edit().putString("current_mode", mode).apply();
     }
 
-    // ==========================================
-    // 🚫 Reels, Keywords & Filters
-    // ==========================================
     public boolean isReelsBlockEnabled() {
         return prefs.getBoolean("block_reels", false);
     }
@@ -104,10 +94,6 @@ public class ShieldPreferences {
         writeSet("blocked_keywords", keywords);
     }
 
-    // ==========================================
-    // 🔞 Adult Filter
-    // ✅ NEW: toggle support — default true (সবসময় on)
-    // ==========================================
     public boolean isAdultFilterEnabled() {
         return prefs.getBoolean("adult_filter_enabled", true);
     }
@@ -116,9 +102,6 @@ public class ShieldPreferences {
         prefs.edit().putBoolean("adult_filter_enabled", enabled).apply();
     }
 
-    // ==========================================
-    // 🔑 Emergency Bypass Settings
-    // ==========================================
     public String getEmergencyPin() {
         return prefs.getString("emergency_pin", "");
     }
@@ -135,9 +118,6 @@ public class ShieldPreferences {
         prefs.edit().putBoolean("is_bypass_active", active).apply();
     }
 
-    // ==========================================
-    // 🔒 Hardcore Protection
-    // ==========================================
     public boolean isBlockSplitScreenEnabled() {
         return prefs.getBoolean("block_split_screen", false);
     }
@@ -170,9 +150,6 @@ public class ShieldPreferences {
         prefs.edit().putBoolean("prevent_uninstall", enabled).apply();
     }
 
-    // ==========================================
-    // ⏱️ Time Limits & Stats
-    // ==========================================
     public Map<String, Integer> getTimeLimits() {
         Map<String, Integer> map = new HashMap<>();
         String jsonString = prefs.getString("time_limits", "{}");
@@ -201,9 +178,6 @@ public class ShieldPreferences {
         }
     }
 
-    // ==========================================
-    // 📊 Usage History (Daily Stats)
-    // ==========================================
     public void saveDailyHistory(String date, long totalMinutes) {
         try {
             String historyJson = prefs.getString("usage_history", "{}");
@@ -227,9 +201,6 @@ public class ShieldPreferences {
         prefs.edit().putLong("today_minutes", minutes).apply();
     }
 
-    // ==========================================
-    // 🔔 Notification Settings
-    // ==========================================
     public boolean isVibrationEnabled() { return prefs.getBoolean("vibrate_alerts", true); }
     public void setVibrationEnabled(boolean v) { prefs.edit().putBoolean("vibrate_alerts", v).apply(); }
 
@@ -239,12 +210,6 @@ public class ShieldPreferences {
     public boolean isLowTimeAlertEnabled() { return prefs.getBoolean("low_time_alert", true); }
     public void setLowTimeAlert(boolean a) { prefs.edit().putBoolean("low_time_alert", a).apply(); }
 
-    /**
-     * Per-app daily limit in minutes (0 = unlimited).
-     * NOTE: reads the SAME "time_limits" JSON that {@link #setTimeLimits(Map)} writes.
-     * It previously read a "limit_<pkg>" int key that nothing ever wrote, so every
-     * configured limit silently resolved to 0 (limits were dead).
-     */
     public int getAppLimit(String pkg) {
         if (pkg == null) return 0;
         Integer v = getTimeLimits().get(pkg);
@@ -258,10 +223,6 @@ public class ShieldPreferences {
         setTimeLimits(limits);
     }
 
-
-    // ==========================================
-    // 📅 Reset Dates
-    // ==========================================
     public String getLastResetDate() {
         return prefs.getString("last_reset_date", "");
     }
@@ -274,9 +235,6 @@ public class ShieldPreferences {
         prefs.edit().putString("last_reset_date", date).apply();
     }
 
-    // ==========================================
-    // 📊 Block Attempts Counter
-    // ==========================================
     public int getBlockedAttemptsToday() {
         return prefs.getInt("blocked_attempts_" + getLastResetDate(), 0);
     }
@@ -287,9 +245,6 @@ public class ShieldPreferences {
         prefs.edit().putInt("blocked_attempts_" + today, current + 1).apply();
     }
 
-    // ==========================================
-    // ⏱️ Floating Timer Settings
-    // ==========================================
     public boolean isFloatingTimerEnabled() { return prefs.getBoolean("floating_timer", false); }
     public void setFloatingTimerEnabled(boolean v) { prefs.edit().putBoolean("floating_timer", v).apply(); }
 
@@ -305,230 +260,197 @@ public class ShieldPreferences {
     public int getTimerX() { return prefs.getInt("timer_x", 0); }
     public int getTimerY() { return prefs.getInt("timer_y", 100); }
     public void setTimerPosition(int x, int y) { prefs.edit().putInt("timer_x", x).putInt("timer_y", y).apply(); }
-    // 🎨 Adult Filter — Block Screen Style
-// [SHIELD-CARD] Block card options, synced from the "Block Screen Style" page
-public boolean isBlockCountdownEnabled() {
-    return prefs.getBoolean("block_countdown_enabled", true);
-}
-public void setBlockCountdownEnabled(boolean enabled) {
-    prefs.edit().putBoolean("block_countdown_enabled", enabled).apply();
-}
-public String getBlockScreenTheme() {
-    return prefs.getString("block_screen_theme", "");
-}
-public void setBlockScreenTheme(String theme) {
-    prefs.edit().putString("block_screen_theme", theme == null ? "" : theme).apply();
-}
-public String getBlockScreenText() {
-    return prefs.getString("block_screen_text", "");
-}
-public void setBlockScreenText(String text) {
-    prefs.edit().putString("block_screen_text", text == null ? "" : text).apply();
-}
-public String getAdultBlockScreenStyle() {
-    return prefs.getString("adult_block_style", "focus");
-}
-public void setAdultBlockScreenStyle(String style) {
-    prefs.edit().putString("adult_block_style", style).apply();
-}
 
-public String getAdultBlockCustomMessage() {
-    return prefs.getString("adult_block_custom_msg", "");
-}
-public void setAdultBlockCustomMessage(String message) {
-    prefs.edit().putString("adult_block_custom_msg", message).apply();
-}
-
-// 🗑️ Clear History
-public void clearHistory() {
-    prefs.edit().remove("usage_history").apply();
-    prefs.edit().putLong("today_minutes", 0).apply();
-}
-
-// ==========================================
-// 📱 Monitored Apps (keyword scan applies here)
-// ==========================================
-public Set<String> getMonitoredApps() {
-    return readSet("monitored_apps");
-}
-
-public void setMonitoredApps(Set<String> apps) {
-    writeSet("monitored_apps", apps);
-}
-
-// ==========================================
-// ✨ Light Orb Timer — style + real session state
-// ==========================================
-public boolean isOrbShowSeconds() { return prefs.getBoolean("orb_show_seconds", true); }
-public void setOrbShowSeconds(boolean v) { prefs.edit().putBoolean("orb_show_seconds", v).apply(); }
-
-public boolean isOrbPulseEnabled() { return prefs.getBoolean("orb_pulse", true); }
-public void setOrbPulseEnabled(boolean v) { prefs.edit().putBoolean("orb_pulse", v).apply(); }
-
-/** Orb diameter in dp (44–112). */
-public int getOrbSize() { return prefs.getInt("orb_size", 64); }
-public void setOrbSize(int dp) { prefs.edit().putInt("orb_size", dp).apply(); }
-
-/**
- * The session is stored as a wall-clock end timestamp (not a counter), so the
- * remaining time survives process death, service restarts and doze.
- */
-public boolean hasFocusSession() {
-    return prefs.getLong("focus_end_ms", 0) > 0 || prefs.getLong("focus_paused_remaining_ms", 0) > 0;
-}
-
-public boolean isFocusSessionPaused() {
-    return prefs.getBoolean("focus_paused", false);
-}
-
-public long getFocusRemainingMs() {
-    if (isFocusSessionPaused()) return prefs.getLong("focus_paused_remaining_ms", 0);
-    long end = prefs.getLong("focus_end_ms", 0);
-    if (end <= 0) return 0;
-    return Math.max(0, end - System.currentTimeMillis());
-}
-
-public void startFocusSession(int minutes) {
-    prefs.edit()
-        .putLong("focus_end_ms", System.currentTimeMillis() + minutes * 60_000L)
-        .putBoolean("focus_paused", false)
-        .putLong("focus_paused_remaining_ms", 0)
-        .apply();
-}
-
-public void pauseFocusSession() {
-    if (isFocusSessionPaused()) return;
-    long remaining = getFocusRemainingMs();
-    prefs.edit()
-        .putBoolean("focus_paused", true)
-        .putLong("focus_paused_remaining_ms", remaining)
-        .putLong("focus_end_ms", 0)
-        .apply();
-}
-
-public void resumeFocusSession() {
-    if (!isFocusSessionPaused()) return;
-    long remaining = prefs.getLong("focus_paused_remaining_ms", 0);
-    prefs.edit()
-        .putBoolean("focus_paused", false)
-        .putLong("focus_paused_remaining_ms", 0)
-        .putLong("focus_end_ms", System.currentTimeMillis() + remaining)
-        .apply();
-}
-
-public void addFocusMinutes(int minutes) {
-    if (isFocusSessionPaused()) {
-        long r = prefs.getLong("focus_paused_remaining_ms", 0) + minutes * 60_000L;
-        prefs.edit().putLong("focus_paused_remaining_ms", Math.max(0, r)).apply();
-    } else {
-        long end = prefs.getLong("focus_end_ms", System.currentTimeMillis());
-        prefs.edit().putLong("focus_end_ms", end + minutes * 60_000L).apply();
+    public boolean isBlockCountdownEnabled() {
+        return prefs.getBoolean("block_countdown_enabled", true);
     }
-}
-
-public void stopFocusSession() {
-    prefs.edit()
-        .putLong("focus_end_ms", 0)
-        .putBoolean("focus_paused", false)
-        .putLong("focus_paused_remaining_ms", 0)
-        .apply();
-}
-
-// ==========================================
-// 🔒 App Lock (protects Focus Shield itself)
-// ==========================================
-public boolean isAppLockEnabled() { return prefs.getBoolean("app_lock_enabled", false); }
-public void setAppLockEnabled(boolean v) { prefs.edit().putBoolean("app_lock_enabled", v).apply(); }
-
-public boolean isAppLockBiometricEnabled() { return prefs.getBoolean("app_lock_biometric", true); }
-public void setAppLockBiometricEnabled(boolean v) { prefs.edit().putBoolean("app_lock_biometric", v).apply(); }
-
-/** Stores only a salted hash — the raw PIN is never persisted. */
-public void setAppLockPin(String pin) {
-    prefs.edit().putString("app_lock_pin_hash", hashPin(pin)).apply();
-}
-
-public boolean hasAppLockPin() {
-    String h = prefs.getString("app_lock_pin_hash", "");
-    return h != null && !h.isEmpty();
-}
-
-public boolean verifyAppLockPin(String pin) {
-    String stored = prefs.getString("app_lock_pin_hash", "");
-    if (stored == null || stored.isEmpty()) return false;
-    return stored.equals(hashPin(pin));
-}
-
-public void clearAppLockPin() {
-    prefs.edit().remove("app_lock_pin_hash").apply();
-}
-
-private String hashPin(String pin) {
-    try {
-        java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
-        byte[] out = md.digest(("shield_v2$" + pin).getBytes("UTF-8"));
-        StringBuilder sb = new StringBuilder();
-        for (byte b : out) sb.append(String.format("%02x", b));
-        return sb.toString();
-    } catch (Exception e) {
-        return "";
+    public void setBlockCountdownEnabled(boolean enabled) {
+        prefs.edit().putBoolean("block_countdown_enabled", enabled).apply();
     }
-}
-
-// ==========================================
-// 🌅 Day boundary + general notification prefs
-// ==========================================
-/** Hour (0–23) at which daily counters/limits reset. */
-public int getStartOfDayHour() { return prefs.getInt("start_of_day_hour", 0); }
-public void setStartOfDayHour(int hour) {
-    prefs.edit().putInt("start_of_day_hour", Math.max(0, Math.min(23, hour))).apply();
-}
-
-public boolean isAutoResetDailyEnabled() { return prefs.getBoolean("auto_reset_daily", true); }
-public void setAutoResetDailyEnabled(boolean v) { prefs.edit().putBoolean("auto_reset_daily", v).apply(); }
-
-// ==========================================
-// ✈️ Telegram Guard — offline 18+ enforcement inside Telegram
-// Keys mirror the JS bridge fields 1:1 (see shieldPlugin.ts TelegramGuardConfig).
-// ==========================================
-public static final String[] TELEGRAM_GUARD_KEYS = new String[]{
-    "enabled", "blockChats", "blockSearch", "blockInviteLinks",
-    "blockAllInvites", "blockMedia", "blockAllMedia"
-};
-
-private static boolean telegramDefault(String key) {
-    // Strict extras are opt-in, everything else is on by default.
-    return !("blockAllInvites".equals(key) || "blockAllMedia".equals(key));
-}
-
-public boolean getTelegramGuardOption(String key) {
-    return prefs.getBoolean("tg_guard_" + key, telegramDefault(key));
-}
-
-public void setTelegramGuardOption(String key, boolean value) {
-    prefs.edit().putBoolean("tg_guard_" + key, value).apply();
-    // Without this, a running ShieldAccessibilityService keeps using its cached
-    // TelegramGuard.Config (loaded at some earlier, unrelated point) until some
-    // other event happens to reload it — so turning the guard off here would not
-    // actually take effect until the service was restarted. This makes the
-    // toggle take effect immediately.
-    try {
-        com.mylifeos.app.shield.ShieldAccessibilityService.refreshContentConfiguration();
-    } catch (Throwable ignored) {
-        // Service may not be running yet (e.g. accessibility permission not granted) — fine.
+    public String getBlockScreenTheme() {
+        return prefs.getString("block_screen_theme", "");
     }
-}
+    public void setBlockScreenTheme(String theme) {
+        prefs.edit().putString("block_screen_theme", theme == null ? "" : theme).apply();
+    }
+    public String getBlockScreenText() {
+        return prefs.getString("block_screen_text", "");
+    }
+    public void setBlockScreenText(String text) {
+        prefs.edit().putString("block_screen_text", text == null ? "" : text).apply();
+    }
+    public String getAdultBlockScreenStyle() {
+        return prefs.getString("adult_block_style", "focus");
+    }
+    public void setAdultBlockScreenStyle(String style) {
+        prefs.edit().putString("adult_block_style", style).apply();
+    }
 
-public com.mylifeos.app.shield.core.TelegramGuard.Config getTelegramGuardConfig() {
-    com.mylifeos.app.shield.core.TelegramGuard.Config cfg =
-        new com.mylifeos.app.shield.core.TelegramGuard.Config();
-    cfg.enabled          = getTelegramGuardOption("enabled");
-    cfg.blockChats       = getTelegramGuardOption("blockChats");
-    cfg.blockSearch      = getTelegramGuardOption("blockSearch");
-    cfg.blockInviteLinks = getTelegramGuardOption("blockInviteLinks");
-    cfg.blockAllInvites  = getTelegramGuardOption("blockAllInvites");
-    cfg.blockMedia       = getTelegramGuardOption("blockMedia");
-    cfg.blockAllMedia    = getTelegramGuardOption("blockAllMedia");
-    return cfg;
-}
+    public String getAdultBlockCustomMessage() {
+        return prefs.getString("adult_block_custom_msg", "");
+    }
+    public void setAdultBlockCustomMessage(String message) {
+        prefs.edit().putString("adult_block_custom_msg", message).apply();
+    }
+
+    public void clearHistory() {
+        prefs.edit().remove("usage_history").apply();
+        prefs.edit().putLong("today_minutes", 0).apply();
+    }
+
+    public Set<String> getMonitoredApps() {
+        return readSet("monitored_apps");
+    }
+
+    public void setMonitoredApps(Set<String> apps) {
+        writeSet("monitored_apps", apps);
+    }
+
+    public boolean isOrbShowSeconds() { return prefs.getBoolean("orb_show_seconds", true); }
+    public void setOrbShowSeconds(boolean v) { prefs.edit().putBoolean("orb_show_seconds", v).apply(); }
+
+    public boolean isOrbPulseEnabled() { return prefs.getBoolean("orb_pulse", true); }
+    public void setOrbPulseEnabled(boolean v) { prefs.edit().putBoolean("orb_pulse", v).apply(); }
+
+    public int getOrbSize() { return prefs.getInt("orb_size", 64); }
+    public void setOrbSize(int dp) { prefs.edit().putInt("orb_size", dp).apply(); }
+
+    public boolean hasFocusSession() {
+        return prefs.getLong("focus_end_ms", 0) > 0 || prefs.getLong("focus_paused_remaining_ms", 0) > 0;
+    }
+
+    public boolean isFocusSessionPaused() {
+        return prefs.getBoolean("focus_paused", false);
+    }
+
+    public long getFocusRemainingMs() {
+        if (isFocusSessionPaused()) return prefs.getLong("focus_paused_remaining_ms", 0);
+        long end = prefs.getLong("focus_end_ms", 0);
+        if (end <= 0) return 0;
+        return Math.max(0, end - System.currentTimeMillis());
+    }
+
+    public void startFocusSession(int minutes) {
+        prefs.edit()
+            .putLong("focus_end_ms", System.currentTimeMillis() + minutes * 60_000L)
+            .putBoolean("focus_paused", false)
+            .putLong("focus_paused_remaining_ms", 0)
+            .apply();
+    }
+
+    public void pauseFocusSession() {
+        if (isFocusSessionPaused()) return;
+        long remaining = getFocusRemainingMs();
+        prefs.edit()
+            .putBoolean("focus_paused", true)
+            .putLong("focus_paused_remaining_ms", remaining)
+            .putLong("focus_end_ms", 0)
+            .apply();
+    }
+
+    public void resumeFocusSession() {
+        if (!isFocusSessionPaused()) return;
+        long remaining = prefs.getLong("focus_paused_remaining_ms", 0);
+        prefs.edit()
+            .putBoolean("focus_paused", false)
+            .putLong("focus_paused_remaining_ms", 0)
+            .putLong("focus_end_ms", System.currentTimeMillis() + remaining)
+            .apply();
+    }
+
+    public void addFocusMinutes(int minutes) {
+        if (isFocusSessionPaused()) {
+            long r = prefs.getLong("focus_paused_remaining_ms", 0) + minutes * 60_000L;
+            prefs.edit().putLong("focus_paused_remaining_ms", Math.max(0, r)).apply();
+        } else {
+            long end = prefs.getLong("focus_end_ms", System.currentTimeMillis());
+            prefs.edit().putLong("focus_end_ms", end + minutes * 60_000L).apply();
+        }
+    }
+
+    public void stopFocusSession() {
+        prefs.edit()
+            .putLong("focus_end_ms", 0)
+            .putBoolean("focus_paused", false)
+            .putLong("focus_paused_remaining_ms", 0)
+            .apply();
+    }
+
+    public boolean isAppLockEnabled() { return prefs.getBoolean("app_lock_enabled", false); }
+    public void setAppLockEnabled(boolean v) { prefs.edit().putBoolean("app_lock_enabled", v).apply(); }
+
+    public boolean isAppLockBiometricEnabled() { return prefs.getBoolean("app_lock_biometric", true); }
+    public void setAppLockBiometricEnabled(boolean v) { prefs.edit().putBoolean("app_lock_biometric", v).apply(); }
+
+    public void setAppLockPin(String pin) {
+        prefs.edit().putString("app_lock_pin_hash", hashPin(pin)).apply();
+    }
+
+    public boolean hasAppLockPin() {
+        String h = prefs.getString("app_lock_pin_hash", "");
+        return h != null && !h.isEmpty();
+    }
+
+    public boolean verifyAppLockPin(String pin) {
+        String stored = prefs.getString("app_lock_pin_hash", "");
+        if (stored == null || stored.isEmpty()) return false;
+        return stored.equals(hashPin(pin));
+    }
+
+    public void clearAppLockPin() {
+        prefs.edit().remove("app_lock_pin_hash").apply();
+    }
+
+    private String hashPin(String pin) {
+        try {
+            java.security.MessageDigest md = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] out = md.digest(("shield_v2$" + pin).getBytes("UTF-8"));
+            StringBuilder sb = new StringBuilder();
+            for (byte b : out) sb.append(String.format("%02x", b));
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    public int getStartOfDayHour() { return prefs.getInt("start_of_day_hour", 0); }
+    public void setStartOfDayHour(int hour) {
+        prefs.edit().putInt("start_of_day_hour", Math.max(0, Math.min(23, hour))).apply();
+    }
+
+    public boolean isAutoResetDailyEnabled() { return prefs.getBoolean("auto_reset_daily", true); }
+    public void setAutoResetDailyEnabled(boolean v) { prefs.edit().putBoolean("auto_reset_daily", v).apply(); }
+
+    public static final String[] TELEGRAM_GUARD_KEYS = new String[]{
+        "enabled", "blockChats", "blockSearch", "blockInviteLinks",
+        "blockAllInvites", "blockMedia", "blockAllMedia"
+    };
+
+    private static boolean telegramDefault(String key) {
+        return !("blockAllInvites".equals(key) || "blockAllMedia".equals(key));
+    }
+
+    public boolean getTelegramGuardOption(String key) {
+        return prefs.getBoolean("tg_guard_" + key, telegramDefault(key));
+    }
+
+    public void setTelegramGuardOption(String key, boolean value) {
+        prefs.edit().putBoolean("tg_guard_" + key, value).apply();
+        try {
+            com.mylifeos.app.shield.ShieldAccessibilityService.refreshContentConfiguration();
+        } catch (Throwable ignored) {}
+    }
+
+    public com.mylifeos.app.shield.core.TelegramGuard.Config getTelegramGuardConfig() {
+        com.mylifeos.app.shield.core.TelegramGuard.Config cfg =
+            new com.mylifeos.app.shield.core.TelegramGuard.Config();
+        cfg.enabled          = getTelegramGuardOption("enabled");
+        cfg.blockChats       = getTelegramGuardOption("blockChats");
+        cfg.blockSearch      = getTelegramGuardOption("blockSearch");
+        cfg.blockInviteLinks = getTelegramGuardOption("blockInviteLinks");
+        cfg.blockAllInvites  = getTelegramGuardOption("blockAllInvites");
+        cfg.blockMedia       = getTelegramGuardOption("blockMedia");
+        cfg.blockAllMedia    = getTelegramGuardOption("blockAllMedia");
+        return cfg;
+    }
 }
