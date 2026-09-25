@@ -13,7 +13,8 @@ import { toast } from 'sonner';
 import { useNightToRise } from './useNightToRise';
 import { NightToRiseBlocklist } from './NightToRiseBlocklist';
 import { NightToRiseInsights } from './NightToRiseInsights';
-import { AllowedApp, ScheduleMode } from './types';
+import { InstalledAppPicker } from './InstalledAppPicker';
+import { ScheduleMode, ALWAYS_ALLOWED_IDS } from './types';
 
 interface Props {
   open: boolean;
@@ -25,20 +26,12 @@ const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 export function NightToRisePage({ open, onClose, riseAlarmTime }: Props) {
   const { config, update, status, pauseTonight, canPauseTonight } = useNightToRise(riseAlarmTime);
-  const [newApp, setNewApp] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const toggleDay = (d: number) => {
     const set = new Set(config.scheduleDays);
     set.has(d) ? set.delete(d) : set.add(d);
     update({ scheduleDays: Array.from(set).sort() });
-  };
-
-  const addApp = () => {
-    const name = newApp.trim();
-    if (!name) return;
-    const app: AllowedApp = { id: name.toLowerCase().replace(/\s+/g, '-'), name };
-    update({ allowedApps: [...config.allowedApps, app] });
-    setNewApp('');
   };
 
   const removeApp = (id: string) =>
@@ -141,18 +134,20 @@ export function NightToRisePage({ open, onClose, riseAlarmTime }: Props) {
                   </div>
                 ))}
               </div>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Add app name (e.g. Spotify)"
-                  value={newApp}
-                  onChange={(e) => setNewApp(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && addApp()}
-                />
-                <Button size="icon" onClick={addApp}><Plus className="h-4 w-4" /></Button>
-              </div>
+              <Button variant="outline" className="w-full" onClick={() => setPickerOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" /> Choose allowed apps
+              </Button>
               <p className="text-[11px] text-muted-foreground">
-                Note: this list currently matches by exact Android package name. A proper app picker is coming in the next update — for now, only the pre-filled defaults (Phone, Clock, Camera) are guaranteed to work reliably.
+                Phone, Clock and Emergency are always allowed.
               </p>
+              <InstalledAppPicker
+                open={pickerOpen}
+                title="Allowed apps"
+                selected={config.allowedApps.map((a) => a.id)}
+                lockedIds={ALWAYS_ALLOWED_IDS}
+                onClose={() => setPickerOpen(false)}
+                onSave={(apps) => { update({ allowedApps: apps }); setPickerOpen(false); }}
+              />
             </div>
           </Section>
 

@@ -16,6 +16,7 @@ import {
   SUGGESTED_BLOCK_SITES,
   ALWAYS_ALLOWED_IDS,
 } from './types';
+import { InstalledAppPicker } from './InstalledAppPicker';
 
 interface Props {
   config: NightToRiseConfig;
@@ -27,7 +28,7 @@ function normalizeSite(v: string) {
 }
 
 export function NightToRiseBlocklist({ config, update }: Props) {
-  const [customApp, setCustomApp] = useState('');
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [customSite, setCustomSite] = useState('');
   const [customKeyword, setCustomKeyword] = useState('');
 
@@ -40,15 +41,6 @@ export function NightToRiseBlocklist({ config, update }: Props) {
         ? config.blockedApps.filter((a) => a.id !== app.id)
         : [...config.blockedApps, app],
     });
-  };
-
-  const addCustomApp = () => {
-    const name = customApp.trim();
-    if (!name) return;
-    const id = name.toLowerCase().replace(/\s+/g, '.');
-    if (ALWAYS_ALLOWED_IDS.includes(id) || isBlocked(id)) { setCustomApp(''); return; }
-    update({ blockedApps: [...config.blockedApps, { id, name }] });
-    setCustomApp('');
   };
 
   const addSite = (raw: string) => {
@@ -130,15 +122,19 @@ export function NightToRiseBlocklist({ config, update }: Props) {
           </div>
         )}
 
-        <div className="mt-3 flex gap-2">
-          <Input
-            placeholder="Add app (e.g. Telegram)"
-            value={customApp}
-            onChange={(e) => setCustomApp(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addCustomApp()}
-          />
-          <Button size="icon" onClick={addCustomApp}><Plus className="h-4 w-4" /></Button>
-        </div>
+        <Button variant="outline" className="mt-3 w-full" onClick={() => setPickerOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" /> Choose apps from phone
+        </Button>
+        <InstalledAppPicker
+          open={pickerOpen}
+          title="Apps to block"
+          selected={config.blockedApps.map((a) => a.id)}
+          onClose={() => setPickerOpen(false)}
+          onSave={(apps) => {
+            update({ blockedApps: apps.filter((a) => !ALWAYS_ALLOWED_IDS.includes(a.id)) });
+            setPickerOpen(false);
+          }}
+        />
       </div>
 
       {/* Blocked sites */}
