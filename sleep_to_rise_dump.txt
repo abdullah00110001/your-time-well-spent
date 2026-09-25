@@ -1,0 +1,1342 @@
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/nighttorise/NightToRisePreferences.java===
+package com.mylifeos.app.rise.nighttorise;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
+
+/**
+ * Persists the Sleep-to-Rise state that the native side needs, derived from
+ * the JSON `NightToRiseConfig` pushed from JS via NightToRisePlugin#setConfig.
+ *
+ * IMPORTANT: JSON is parsed exactly once, inside applyConfigJson(), and the
+ * result is stored as plain SharedPreferences primitives/sets. The
+ * AccessibilityService reads these primitives on every foreground-app
+ * change, so it must never re-parse JSON on that hot path.
+ *
+ * Field names below mirror src/components/rise/night-to-rise/types.ts
+ * (NightToRiseConfig) as closely as Android SharedPreferences allows.
+ */
+public final class NightToRisePreferences {
+
+    private static final String PREFS_NAME = "night_to_rise_prefs";
+
+    // --- mirrors of NightToRiseConfig ---
+    private static final String KEY_ENABLED = "n2r_enabled";
+    private static final String KEY_CONFIGURED = "n2r_configured";
+    private static final String KEY_SLEEP_TIME_MINUTES = "n2r_sleep_time_minutes";
+    private static final String KEY_SLEEP_LOCK_BEFORE = "n2r_sleep_lock_before";
+    private static final String KEY_RISE_LOCK_AFTER = "n2r_rise_lock_after";
+    private static final String KEY_BLOCKLIST_MODE = "n2r_blocklist_mode"; // "blocklist" | "allowlist"
+    private static final String KEY_BLOCKED_APPS = "n2r_blocked_apps";
+    private static final String KEY_ALLOWED_APPS = "n2r_allowed_apps";
+    private static final String KEY_SCHEDULE_MODE = "n2r_schedule_mode"; // everyday|weekdays|custom
+    private static final String KEY_SCHEDULE_DAYS = "n2r_schedule_days"; // set of "0".."6"
+    private static final String KEY_STRICT_MODE = "n2r_strict_mode";
+    private static final String KEY_PAUSED_UNTIL_EPOCH = "n2r_paused_until_epoch";
+    private static final String KEY_SLEEP_BLOCK_MESSAGE = "n2r_sleep_block_message";
+    private static final String KEY_RISE_BLOCK_MESSAGE = "n2r_rise_block_message";
+    private static final String KEY_SHOW_STREAK_ON_BLOCK = "n2r_show_streak_on_block";
+
+    // --- pushed separately via setRiseAlarm ---
+    private static final String KEY_RISE_ALARM_EPOCH = "n2r_rise_alarm_epoch";
+
+    // --- native-only runtime state ---
+    private static final String KEY_RISE_GUARD_ACTIVE_UNTIL_EPOCH = "n2r_rise_guard_active_until";
+    private static final String KEY_OVERRIDDEN_FOR_WINDOW = "n2r_overridden_for_window";
+    private static final String KEY_STRICT_UNLOCK_REQUESTED_AT = "n2r_strict_unlock_requested_at";
+    private static final String KEY_PENDING_BREAK = "n2r_pending_break";
+
+    /** Mirrors ALWAYS_ALLOWED_IDS in types.ts — never blocked, in either mode. */
+    public static final Set<String> ALWAYS_ALLOWED_IDS = new HashSet<>(Arrays.asList(
+            "com.android.phone",
+            "com.android.dialer",
+            "com.google.android.dialer",
+            "com.android.server.telecom",
+            "com.android.emergency",
+            "com.android.deskclock",
+            "com.google.android.deskclock"
+    ));
+
+    public static final long STRICT_UNLOCK_DELAY_MS = 10 * 60 * 1000L;
+
+    private final SharedPreferences prefs;
+
+    public NightToRisePreferences(Context context) {
+        this.prefs = context.getApplicationContext()
+                .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+    }
+
+    /**
+     * Parses the full NightToRiseConfig JSON (as sent by nightToRiseBridge.setConfig)
+     * and stores the derived fields. Called once per JS-side config push, never on
+     * the accessibility hot path.
+     */
+    public void applyConfigJson(String json) throws JSONException {
+        JSONObject obj = new JSONObject(json);
+
+        SharedPreferences.Editor editor = prefs.edit();
+
+        editor.putBoolean(KEY_ENABLED, obj.optBoolean("enabled", false));
+        editor.putBoolean(KEY_CONFIGURED, obj.optBoolean("configured", false));
+
+        int sleepMinutes = parseHHMM(obj.optString("sleepTime", "22:30"));
+        editor.putInt(KEY_SLEEP_TIME_MINUTES, sleepMinutes);
+        editor.putInt(KEY_SLEEP_LOCK_BEFORE, obj.optInt("sleepLockMinutesBefore", 30));
+        editor.putInt(KEY_RISE_LOCK_AFTER, obj.optInt("riseLockMinutesAfter", 30));
+
+        editor.putString(KEY_BLOCKLIST_MODE, obj.optString("blocklistMode", "blocklist"));
+        editor.putStringSet(KEY_BLOCKED_APPS, extractIds(obj.optJSONArray("blockedApps")));
+        editor.putStringSet(KEY_ALLOWED_APPS, extractIds(obj.optJSONArray("allowedApps")));
+
+        editor.putString(KEY_SCHEDULE_MODE, obj.optString("scheduleMode", "everyday"));
+        editor.putStringSet(KEY_SCHEDULE_DAYS, extractInts(obj.optJSONArray("scheduleDays")));
+
+        editor.putBoolean(KEY_STRICT_MODE, obj.optBoolean("strictMode", false));
+
+        String pausedUntilIso = obj.isNull("pausedUntil") ? null : obj.optString("pausedUntil", null);
+        editor.putLong(KEY_PAUSED_UNTIL_EPOCH, parseIsoToEpoch(pausedUntilIso));
+
+        editor.putString(KEY_SLEEP_BLOCK_MESSAGE,
+                obj.optString("sleepBlockMessage", "Time to rest. Put the phone down."));
+        editor.putString(KEY_RISE_BLOCK_MESSAGE,
+                obj.optString("riseBlockMessage", "Start your morning right. No scrolling yet."));
+        editor.putBoolean(KEY_SHOW_STREAK_ON_BLOCK, obj.optBoolean("showStreakOnBlock", true));
+
+        editor.apply();
+    }
+
+    private static Set<String> extractIds(JSONArray apps) {
+        Set<String> out = new HashSet<>();
+        if (apps == null) return out;
+        for (int i = 0; i < apps.length(); i++) {
+            JSONObject app = apps.optJSONObject(i);
+            if (app != null) {
+                String id = app.optString("id", null);
+                if (id != null) out.add(id);
+            }
+        }
+        return out;
+    }
+
+    private static Set<String> extractInts(JSONArray arr) {
+        Set<String> out = new HashSet<>();
+        if (arr == null) return out;
+        for (int i = 0; i < arr.length(); i++) {
+            out.add(String.valueOf(arr.optInt(i, -1)));
+        }
+        return out;
+    }
+
+    /** "HH:MM" -> minutes since midnight. Defaults to 0 on malformed input. */
+    public static int parseHHMM(String hhmm) {
+        if (hhmm == null) return 0;
+        String[] parts = hhmm.split(":");
+        if (parts.length != 2) return 0;
+        try {
+            int h = Integer.parseInt(parts[0].trim());
+            int m = Integer.parseInt(parts[1].trim());
+            return h * 60 + m;
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Parses a JS `Date#toISOString()` value (e.g. "2026-09-25T18:30:00.000Z"),
+     * which is exactly what NightToRiseConfig.pausedUntil is set from
+     * (see useNightToRise.ts#pauseTonight). Requires minSdk 26 for
+     * java.time; this project already targets a modern minSdk elsewhere
+     * (Capacitor/AndroidX baseline), so no desugaring fallback is included
+     * here — add one if your minSdk is below 26.
+     */
+    private static long parseIsoToEpoch(String iso) {
+        if (iso == null || iso.isEmpty()) return 0L;
+        try {
+            return java.time.Instant.parse(iso).toEpochMilli();
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
+    // ---- getters used by NightToRiseDecider / NightToRiseBlockActivity ----
+
+    public boolean isEnabled() {
+        return prefs.getBoolean(KEY_ENABLED, false);
+    }
+
+    public boolean isConfigured() {
+        return prefs.getBoolean(KEY_CONFIGURED, false);
+    }
+
+    public int getSleepTimeMinutes() {
+        return prefs.getInt(KEY_SLEEP_TIME_MINUTES, 22 * 60 + 30);
+    }
+
+    public int getSleepLockMinutesBefore() {
+        return prefs.getInt(KEY_SLEEP_LOCK_BEFORE, 30);
+    }
+
+    public int getRiseLockMinutesAfter() {
+        return prefs.getInt(KEY_RISE_LOCK_AFTER, 30);
+    }
+
+    public String getBlocklistMode() {
+        return prefs.getString(KEY_BLOCKLIST_MODE, "blocklist");
+    }
+
+    public Set<String> getBlockedApps() {
+        return new HashSet<>(prefs.getStringSet(KEY_BLOCKED_APPS, new HashSet<>()));
+    }
+
+    public Set<String> getAllowedApps() {
+        return new HashSet<>(prefs.getStringSet(KEY_ALLOWED_APPS, new HashSet<>()));
+    }
+
+    public String getScheduleMode() {
+        return prefs.getString(KEY_SCHEDULE_MODE, "everyday");
+    }
+
+    public Set<String> getScheduleDays() {
+        return new HashSet<>(prefs.getStringSet(KEY_SCHEDULE_DAYS,
+                new HashSet<>(Arrays.asList("0", "1", "2", "3", "4", "5", "6"))));
+    }
+
+    public boolean isStrictMode() {
+        return prefs.getBoolean(KEY_STRICT_MODE, false);
+    }
+
+    public long getPausedUntilEpoch() {
+        return prefs.getLong(KEY_PAUSED_UNTIL_EPOCH, 0L);
+    }
+
+    public String getSleepBlockMessage() {
+        return prefs.getString(KEY_SLEEP_BLOCK_MESSAGE, "Time to rest. Put the phone down.");
+    }
+
+    public String getRiseBlockMessage() {
+        return prefs.getString(KEY_RISE_BLOCK_MESSAGE, "Start your morning right. No scrolling yet.");
+    }
+
+    public boolean isShowStreakOnBlock() {
+        return prefs.getBoolean(KEY_SHOW_STREAK_ON_BLOCK, true);
+    }
+
+    public long getRiseAlarmEpochMillis() {
+        return prefs.getLong(KEY_RISE_ALARM_EPOCH, 0L);
+    }
+
+    public void setRiseAlarmEpochMillis(long epochMillis) {
+        prefs.edit().putLong(KEY_RISE_ALARM_EPOCH, epochMillis).apply();
+    }
+
+    /**
+     * Set by NightToRiseManager#onAlarmDismissed when the rise alarm is
+     * actually turned off — this is what starts Rise Guard, independent of
+     * clock time (a snooze delays it, an early dismiss starts it early).
+     */
+    public long getRiseGuardActiveUntilEpoch() {
+        return prefs.getLong(KEY_RISE_GUARD_ACTIVE_UNTIL_EPOCH, 0L);
+    }
+
+    public void setRiseGuardActiveUntilEpoch(long epochMillis) {
+        prefs.edit().putLong(KEY_RISE_GUARD_ACTIVE_UNTIL_EPOCH, epochMillis).apply();
+    }
+
+    public boolean isOverriddenForWindow() {
+        return prefs.getBoolean(KEY_OVERRIDDEN_FOR_WINDOW, false);
+    }
+
+    public void setOverriddenForWindow(boolean overridden) {
+        prefs.edit().putBoolean(KEY_OVERRIDDEN_FOR_WINDOW, overridden).apply();
+    }
+
+    public long getStrictUnlockRequestedAtEpoch() {
+        return prefs.getLong(KEY_STRICT_UNLOCK_REQUESTED_AT, 0L);
+    }
+
+    public void setStrictUnlockRequestedAtEpoch(long epochMillis) {
+        prefs.edit().putLong(KEY_STRICT_UNLOCK_REQUESTED_AT, epochMillis).apply();
+    }
+
+    public boolean isPendingBreak() {
+        return prefs.getBoolean(KEY_PENDING_BREAK, false);
+    }
+
+    public void setPendingBreak(boolean pending) {
+        prefs.edit().putBoolean(KEY_PENDING_BREAK, pending).apply();
+    }
+
+    /** Consumes (reads + clears) the pending-break flag atomically enough for our needs. */
+    public boolean consumePendingBreak() {
+        boolean value = isPendingBreak();
+        if (value) {
+            setPendingBreak(false);
+        }
+        return value;
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/nighttorise/NightToRiseDecider.java===
+package com.mylifeos.app.rise.nighttorise;
+
+import java.util.Calendar;
+import java.util.Set;
+
+/**
+ * Pure phase logic for Sleep-to-Rise, mirroring the `status` memo in
+ * useNightToRise.ts — with one deliberate difference: Rise Guard here is
+ * event-driven (starts when the alarm is actually dismissed, via
+ * NightToRiseManager#onAlarmDismissed) rather than clock-driven. Sleep
+ * Guard remains clock-driven, anchored to the rise-alarm epoch pushed from
+ * JS via setRiseAlarm.
+ */
+public final class NightToRiseDecider {
+
+    public enum Phase {
+        OFF, PAUSED, INACTIVE_DAY, SLEEP_LOCK, RISE_LOCK, ARMED
+    }
+
+    public static final class Result {
+        public final Phase phase;
+        /** Epoch millis the current lock window ends, or 0 if not locked. */
+        public final long windowEndEpochMillis;
+
+        Result(Phase phase, long windowEndEpochMillis) {
+            this.phase = phase;
+            this.windowEndEpochMillis = windowEndEpochMillis;
+        }
+    }
+
+    private NightToRiseDecider() {
+    }
+
+    public static Result computePhase(NightToRisePreferences prefs, long nowEpochMillis) {
+        if (!prefs.isEnabled() || !prefs.isConfigured()) {
+            return new Result(Phase.OFF, 0L);
+        }
+
+        long pausedUntil = prefs.getPausedUntilEpoch();
+        if (pausedUntil > nowEpochMillis) {
+            return new Result(Phase.PAUSED, pausedUntil);
+        }
+
+        if (!isScheduledToday(prefs, nowEpochMillis)) {
+            return new Result(Phase.INACTIVE_DAY, 0L);
+        }
+
+        // Rise Guard takes priority: it's event-driven (started on alarm
+        // dismiss) and should win even if, for some reason, the clock-driven
+        // sleep-window math still thinks it's "before" the rise alarm.
+        long riseGuardUntil = prefs.getRiseGuardActiveUntilEpoch();
+        if (riseGuardUntil > nowEpochMillis) {
+            return new Result(Phase.RISE_LOCK, riseGuardUntil);
+        }
+
+        long riseAlarmEpoch = prefs.getRiseAlarmEpochMillis();
+        int sleepStartMinutes = wrapMinutes(
+                prefs.getSleepTimeMinutes() - prefs.getSleepLockMinutesBefore());
+
+        long sleepStart;
+        long sleepEnd;
+        if (riseAlarmEpoch > 0) {
+            sleepStart = epochOfPriorOrEqualTimeOfDay(riseAlarmEpoch, sleepStartMinutes);
+            sleepEnd = riseAlarmEpoch;
+        } else {
+            // No alarm configured — fall back to a fixed 9.5h window from
+            // sleep time, same fallback useNightToRise.ts uses for its
+            // in-app preview overlay.
+            sleepStart = epochOfPriorOrEqualTimeOfDay(nowEpochMillis, sleepStartMinutes);
+            if (sleepStart > nowEpochMillis) {
+                sleepStart -= 24L * 60 * 60 * 1000;
+            }
+            sleepEnd = sleepStart + 570L * 60 * 1000; // 9.5 hours
+        }
+
+        if (nowEpochMillis >= sleepStart && nowEpochMillis < sleepEnd) {
+            return new Result(Phase.SLEEP_LOCK, sleepEnd);
+        }
+
+        return new Result(Phase.ARMED, 0L);
+    }
+
+    private static boolean isScheduledToday(NightToRisePreferences prefs, long nowEpochMillis) {
+        String mode = prefs.getScheduleMode();
+        if ("everyday".equals(mode)) {
+            return true;
+        }
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(nowEpochMillis);
+        int dayOfWeek = cal.get(Calendar.DAY_OF_WEEK) - 1; // Calendar.SUNDAY=1 -> 0
+
+        if ("weekdays".equals(mode)) {
+            return dayOfWeek >= 1 && dayOfWeek <= 5;
+        }
+        // "custom"
+        Set<String> days = prefs.getScheduleDays();
+        return days.contains(String.valueOf(dayOfWeek));
+    }
+
+    /**
+     * Finds the most recent epoch (at or before anchorEpochMillis) whose
+     * time-of-day equals minutesOfDay. Used to anchor the sleep-window
+     * start to "the occurrence just before the alarm/now", regardless of
+     * whether that means today or yesterday.
+     */
+    static long epochOfPriorOrEqualTimeOfDay(long anchorEpochMillis, int minutesOfDay) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(anchorEpochMillis);
+        cal.set(Calendar.HOUR_OF_DAY, minutesOfDay / 60);
+        cal.set(Calendar.MINUTE, minutesOfDay % 60);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+        if (cal.getTimeInMillis() > anchorEpochMillis) {
+            cal.add(Calendar.DAY_OF_MONTH, -1);
+        }
+        return cal.getTimeInMillis();
+    }
+
+    private static int wrapMinutes(int minutes) {
+        int wrapped = minutes % 1440;
+        return wrapped < 0 ? wrapped + 1440 : wrapped;
+    }
+
+    /**
+     * Whether a foreground package should be blocked given the current
+     * phase and the configured blocklist/allowlist.
+     */
+    public static boolean shouldBlockPackage(NightToRisePreferences prefs, Phase phase,
+                                              String ownPackageName, String foregroundPackage) {
+        if (phase != Phase.SLEEP_LOCK && phase != Phase.RISE_LOCK) {
+            return false;
+        }
+        if (foregroundPackage.equals(ownPackageName)) {
+            return false;
+        }
+        if (NightToRisePreferences.ALWAYS_ALLOWED_IDS.contains(foregroundPackage)) {
+            return false;
+        }
+        if (prefs.getAllowedApps().contains(foregroundPackage)) {
+            return false;
+        }
+
+        if ("allowlist".equals(prefs.getBlocklistMode())) {
+            // Stricter: everything is locked except explicitly allowed apps
+            // (already excluded above), so anything else reaching here is
+            // blocked.
+            return true;
+        }
+        // "blocklist" mode: only the configured blockedApps are locked.
+        return prefs.getBlockedApps().contains(foregroundPackage);
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/nighttorise/NightToRiseAccessibilityService.java===
+package com.mylifeos.app.rise.nighttorise;
+
+import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.content.Intent;
+import android.util.Log;
+import android.view.accessibility.AccessibilityEvent;
+
+/**
+ * Enforces Sleep-to-Rise by watching foreground-app changes and launching
+ * the block screen when a blocked package surfaces during an active
+ * window.
+ *
+ * This is a STANDALONE accessibility service (not merged into
+ * ShieldAccessibilityService), per an explicit decision to keep Sleep to
+ * Rise independent of the content-blocking Shield system. All enforcement
+ * lives directly inside this service — there is no companion foreground
+ * service to start/stop, so there is nothing that can loop or fail to
+ * turn off.
+ *
+ * NOTE: src/components/rise/night-to-rise/NightToRisePermissions.tsx
+ * currently checks accessibility status via the existing `Shield`
+ * plugin (ShieldPlugin.checkPermissions), which most likely only reports
+ * on ShieldAccessibilityService. Until that's wired to also check this
+ * service, the "Accessibility" permission row may show granted/missing
+ * incorrectly for Sleep to Rise specifically. See NightToRiseManager
+ * #isAccessibilityServiceEnabled for the correct check for THIS service.
+ */
+public class NightToRiseAccessibilityService extends AccessibilityService {
+
+    private static final String TAG = "NightToRiseA11y";
+    private static final long MIN_RECHECK_INTERVAL_MS = 400L;
+
+    private NightToRisePreferences preferences;
+
+    private String lastCheckedPackage = null;
+    private long lastCheckedAtMs = 0L;
+
+    @Override
+    protected void onServiceConnected() {
+        super.onServiceConnected();
+        preferences = new NightToRisePreferences(this);
+
+        AccessibilityServiceInfo info = new AccessibilityServiceInfo();
+        info.eventTypes = AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+        info.feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC;
+        info.flags = AccessibilityServiceInfo.DEFAULT;
+        info.notificationTimeout = 100;
+        setServiceInfo(info);
+
+        Log.i(TAG, "NightToRise accessibility service connected");
+    }
+
+    @Override
+    public void onAccessibilityEvent(AccessibilityEvent event) {
+        if (event == null || event.getEventType() != AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            return;
+        }
+        CharSequence pkg = event.getPackageName();
+        if (pkg == null) {
+            return;
+        }
+        String packageName = pkg.toString();
+
+        if (packageName.equals(getPackageName())) {
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        boolean samePackageRecently = packageName.equals(lastCheckedPackage)
+                && (now - lastCheckedAtMs) < MIN_RECHECK_INTERVAL_MS;
+        if (samePackageRecently) {
+            return;
+        }
+        lastCheckedPackage = packageName;
+        lastCheckedAtMs = now;
+
+        evaluate(packageName, now);
+    }
+
+    private void evaluate(String foregroundPackage, long now) {
+        if (preferences == null) {
+            return;
+        }
+
+        NightToRiseDecider.Result result = NightToRiseDecider.computePhase(preferences, now);
+
+        boolean locked = result.phase == NightToRiseDecider.Phase.SLEEP_LOCK
+                || result.phase == NightToRiseDecider.Phase.RISE_LOCK;
+
+        if (!locked) {
+            // Not in a window — clear any leftover override from a previous window.
+            if (preferences.isOverriddenForWindow()) {
+                preferences.setOverriddenForWindow(false);
+            }
+            return;
+        }
+
+        if (preferences.isOverriddenForWindow()) {
+            // User already used emergency unlock for this window instance.
+            return;
+        }
+
+        boolean blocked = NightToRiseDecider.shouldBlockPackage(
+                preferences, result.phase, getPackageName(), foregroundPackage);
+        if (!blocked) {
+            return;
+        }
+
+        launchBlockScreen(foregroundPackage, result.phase, result.windowEndEpochMillis);
+    }
+
+    private void launchBlockScreen(String blockedPackage, NightToRiseDecider.Phase phase,
+                                    long windowEndEpochMillis) {
+        Intent intent = new Intent(this, NightToRiseBlockActivity.class);
+        intent.putExtra(NightToRiseBlockActivity.EXTRA_BLOCKED_PACKAGE, blockedPackage);
+        intent.putExtra(NightToRiseBlockActivity.EXTRA_PHASE, phase.name());
+        intent.putExtra(NightToRiseBlockActivity.EXTRA_WINDOW_END_EPOCH, windowEndEpochMillis);
+        intent.setFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+        );
+        startActivity(intent);
+    }
+
+    @Override
+    public void onInterrupt() {
+        // No-op: nothing to tear down, there is no companion service.
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/nighttorise/NightToRiseBlockActivity.java===
+package com.mylifeos.app.rise.nighttorise;
+
+import android.content.Intent;
+import android.graphics.Color;
+import android.os.Bundle;
+import android.os.CountDownTimer;
+import android.view.Gravity;
+import android.view.WindowManager;
+import android.widget.Button;
+import android.widget.LinearLayout;
+import android.widget.TextView;
+
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.AppCompatActivity;
+
+/**
+ * Full-screen interstitial shown in place of a blocked app during an
+ * active Sleep/Rise Guard window.
+ *
+ * Mirrors NightToRiseGuard.tsx's strict-mode behavior (10 minute delayed
+ * emergency unlock) natively, since this screen covers OTHER apps and the
+ * JS overlay only covers this app's own UI. PIN verification is
+ * intentionally NOT done here: the PIN lives in the web app's
+ * localStorage ('app_lock_pin'), which native code cannot read. If you
+ * want PIN-gated native unlock, add a plugin method that pushes the PIN
+ * (or a hash of it) down via setConfig and compare it here.
+ *
+ * Built with plain views so this file has no layout-resource dependency.
+ */
+public class NightToRiseBlockActivity extends AppCompatActivity {
+
+    public static final String EXTRA_BLOCKED_PACKAGE = "extra_blocked_package";
+    public static final String EXTRA_PHASE = "extra_phase";
+    public static final String EXTRA_WINDOW_END_EPOCH = "extra_window_end_epoch";
+
+    private NightToRisePreferences preferences;
+    private CountDownTimer countDownTimer;
+    private TextView countdownView;
+    private TextView unlockStatusView;
+    private Button unlockButton;
+
+    @Override
+    protected void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        preferences = new NightToRisePreferences(this);
+
+        getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED
+                        | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        | WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        );
+
+        setContentView(buildContentView());
+        startCountdown();
+        refreshUnlockRow();
+    }
+
+    private LinearLayout buildContentView() {
+        String phaseName = getIntent().getStringExtra(EXTRA_PHASE);
+        boolean isRise = NightToRiseDecider.Phase.RISE_LOCK.name().equals(phaseName);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setGravity(Gravity.CENTER);
+        root.setBackgroundColor(Color.parseColor(isRise ? "#1A1206" : "#0B0F1A"));
+        root.setPadding(64, 64, 64, 64);
+
+        TextView title = new TextView(this);
+        title.setText(isRise ? "Rise Guard is active" : "Sleep Guard is active");
+        title.setTextColor(Color.WHITE);
+        title.setTextSize(22f);
+        title.setGravity(Gravity.CENTER);
+
+        TextView subtitle = new TextView(this);
+        String message = isRise
+                ? preferences.getRiseBlockMessage()
+                : preferences.getSleepBlockMessage();
+        subtitle.setText(message);
+        subtitle.setTextColor(Color.parseColor("#AAAAAA"));
+        subtitle.setTextSize(14f);
+        subtitle.setGravity(Gravity.CENTER);
+        subtitle.setPadding(0, 24, 0, 24);
+
+        countdownView = new TextView(this);
+        countdownView.setTextColor(Color.WHITE);
+        countdownView.setTextSize(28f);
+        countdownView.setGravity(Gravity.CENTER);
+        countdownView.setPadding(0, 0, 0, 32);
+
+        unlockStatusView = new TextView(this);
+        unlockStatusView.setTextColor(Color.parseColor("#AAAAAA"));
+        unlockStatusView.setTextSize(12f);
+        unlockStatusView.setGravity(Gravity.CENTER);
+        unlockStatusView.setPadding(0, 0, 0, 16);
+
+        unlockButton = new Button(this);
+        unlockButton.setOnClickListener(v -> handleUnlockTap());
+
+        Button homeButton = new Button(this);
+        homeButton.setText("Go home");
+        homeButton.setOnClickListener(v -> goHome());
+
+        root.addView(title);
+        root.addView(subtitle);
+        root.addView(countdownView);
+        root.addView(unlockStatusView);
+        root.addView(unlockButton);
+        root.addView(homeButton);
+        return root;
+    }
+
+    private void startCountdown() {
+        long windowEndEpoch = getIntent().getLongExtra(EXTRA_WINDOW_END_EPOCH, 0L);
+        long millisLeft = windowEndEpoch - System.currentTimeMillis();
+        if (millisLeft <= 0) {
+            countdownView.setText("");
+            finish();
+            return;
+        }
+
+        countDownTimer = new CountDownTimer(millisLeft, 1_000L) {
+            @Override
+            public void onTick(long millisUntilFinished) {
+                long totalSeconds = millisUntilFinished / 1000;
+                long hours = totalSeconds / 3600;
+                long minutes = (totalSeconds % 3600) / 60;
+                countdownView.setText(String.format(
+                        "%02d:%02d until unlocked", hours, minutes));
+                refreshUnlockRow();
+            }
+
+            @Override
+            public void onFinish() {
+                finish();
+            }
+        }.start();
+    }
+
+    /** Updates the emergency-unlock button/label based on strict-mode cooldown state. */
+    private void refreshUnlockRow() {
+        boolean strict = preferences.isStrictMode();
+        if (!strict) {
+            unlockButton.setText("Emergency unlock");
+            unlockStatusView.setText("Phone and emergency calls are always reachable.");
+            return;
+        }
+
+        long requestedAt = preferences.getStrictUnlockRequestedAtEpoch();
+        if (requestedAt <= 0) {
+            unlockButton.setText("Request emergency unlock (10 min wait)");
+            unlockStatusView.setText("Strict mode is on.");
+            return;
+        }
+
+        long readyAt = requestedAt + NightToRisePreferences.STRICT_UNLOCK_DELAY_MS;
+        long remainingMs = readyAt - System.currentTimeMillis();
+        if (remainingMs <= 0) {
+            unlockButton.setText("Unlock now");
+            unlockStatusView.setText("Unlock available.");
+        } else {
+            long remMin = remainingMs / 60000;
+            long remSec = (remainingMs % 60000) / 1000;
+            unlockButton.setText("Waiting...");
+            unlockStatusView.setText(String.format(
+                    "Unlock available in %d:%02d", remMin, remSec));
+        }
+    }
+
+    private void handleUnlockTap() {
+        boolean strict = preferences.isStrictMode();
+        if (!strict) {
+            doUnlock();
+            return;
+        }
+
+        long requestedAt = preferences.getStrictUnlockRequestedAtEpoch();
+        if (requestedAt <= 0) {
+            preferences.setStrictUnlockRequestedAtEpoch(System.currentTimeMillis());
+            refreshUnlockRow();
+            return;
+        }
+
+        long readyAt = requestedAt + NightToRisePreferences.STRICT_UNLOCK_DELAY_MS;
+        if (System.currentTimeMillis() >= readyAt) {
+            doUnlock();
+        }
+        // else: still waiting, tap does nothing (button already reflects this).
+    }
+
+    private void doUnlock() {
+        preferences.setOverriddenForWindow(true);
+        preferences.setPendingBreak(true);
+        preferences.setStrictUnlockRequestedAtEpoch(0L);
+        finish();
+    }
+
+    private void goHome() {
+        Intent homeIntent = new Intent(Intent.ACTION_MAIN);
+        homeIntent.addCategory(Intent.CATEGORY_HOME);
+        homeIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(homeIntent);
+        finish();
+    }
+
+    @Override
+    public void onBackPressed() {
+        goHome();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (countDownTimer != null) {
+            countDownTimer.cancel();
+        }
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/nighttorise/NightToRiseManager.java===
+package com.mylifeos.app.rise.nighttorise;
+
+import android.accessibilityservice.AccessibilityServiceInfo;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
+import android.provider.Settings;
+import android.text.TextUtils;
+import android.view.accessibility.AccessibilityManager;
+
+import java.util.List;
+
+/**
+ * Static helpers: accessibility-permission check for
+ * NightToRiseAccessibilityService specifically, boundary-alarm scheduling,
+ * and the alarm-dismiss hook that starts Rise Guard.
+ */
+public final class NightToRiseManager {
+
+    private static final int REQUEST_CODE_BOUNDARY_ALARM = 9421;
+
+    private NightToRiseManager() {
+    }
+
+    /**
+     * Checks specifically for NightToRiseAccessibilityService (not
+     * ShieldAccessibilityService). See the note in
+     * NightToRiseAccessibilityService about NightToRisePermissions.tsx
+     * currently checking a different service via the Shield plugin.
+     */
+    public static boolean isAccessibilityServiceEnabled(Context context) {
+        AccessibilityManager am =
+                (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
+        if (am == null) {
+            return false;
+        }
+        List<AccessibilityServiceInfo> enabledServices =
+                am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
+
+        ComponentName target = new ComponentName(context, NightToRiseAccessibilityService.class);
+        for (AccessibilityServiceInfo info : enabledServices) {
+            String id = info.getId();
+            if (!TextUtils.isEmpty(id) && id.contains(target.getClassName())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static void openAccessibilitySettings(Context context) {
+        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(intent);
+    }
+
+    /**
+     * Call from AlarmStateManager#clearRinging — the exact moment the rise
+     * alarm is dismissed (mission complete or manual stop). Starts Rise
+     * Guard for riseLockMinutesAfter minutes from right now, independent
+     * of what the scheduled alarm time was (so snoozing delays Rise Guard,
+     * an early manual stop starts it early).
+     */
+    public static void onAlarmDismissed(Context context) {
+        NightToRisePreferences prefs = new NightToRisePreferences(context);
+        if (!prefs.isEnabled() || !prefs.isConfigured()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long until = now + (prefs.getRiseLockMinutesAfter() * 60_000L);
+        prefs.setRiseGuardActiveUntilEpoch(until);
+        // Fresh window — any override from the sleep-lock half of the night
+        // does not carry over into Rise Guard.
+        prefs.setOverriddenForWindow(false);
+        prefs.setStrictUnlockRequestedAtEpoch(0L);
+
+        scheduleNextBoundaryAlarm(context);
+    }
+
+    /**
+     * Schedules a single alarm for whichever known boundary comes next
+     * (sleep-window start or rise-guard end), purely so anything listening
+     * for NightToRisePhaseReceiver can refresh promptly. The
+     * AccessibilityService itself never depends on this alarm — it always
+     * recomputes the live phase on its own.
+     */
+    public static void scheduleNextBoundaryAlarm(Context context) {
+        NightToRisePreferences prefs = new NightToRisePreferences(context);
+        if (!prefs.isEnabled() || !prefs.isConfigured()) {
+            cancelBoundaryAlarm(context);
+            return;
+        }
+
+        long now = System.currentTimeMillis();
+        long riseGuardUntil = prefs.getRiseGuardActiveUntilEpoch();
+        long candidate;
+
+        if (riseGuardUntil > now) {
+            candidate = riseGuardUntil;
+        } else {
+            int sleepStartMinutes = ((prefs.getSleepTimeMinutes() - prefs.getSleepLockMinutesBefore())
+                    % 1440 + 1440) % 1440;
+            long nextSleepStart = NightToRiseDecider.epochOfPriorOrEqualTimeOfDay(now, sleepStartMinutes);
+            if (nextSleepStart <= now) {
+                nextSleepStart += 24L * 60 * 60 * 1000;
+            }
+            long riseAlarmEpoch = prefs.getRiseAlarmEpochMillis();
+            candidate = (riseAlarmEpoch > now) ? Math.min(nextSleepStart, riseAlarmEpoch) : nextSleepStart;
+        }
+
+        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager == null) {
+            return;
+        }
+
+        Intent intent = new Intent(context, NightToRisePhaseReceiver.class);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(
+                context, REQUEST_CODE_BOUNDARY_ALARM, intent, flags);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, candidate, pendingIntent);
+        } else {
+            alarmManager.set(AlarmManager.RTC_WAKEUP, candidate, pendingIntent);
+        }
+    }
+
+    public static void cancelBoundaryAlarm(Context context) {
+        AlarmManager alarmManager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        if (alarmManager == null) {
+            return;
+        }
+        Intent intent = new Intent(context, NightToRisePhaseReceiver.class);
+        int flags = PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0);
+        PendingIntent pendingIntent = PendingIntent.getBroadcast(
+                context, REQUEST_CODE_BOUNDARY_ALARM, intent, flags);
+        alarmManager.cancel(pendingIntent);
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/nighttorise/NightToRisePhaseReceiver.java===
+package com.mylifeos.app.rise.nighttorise;
+
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+
+/**
+ * Fires at each known Sleep/Rise Guard boundary purely to reschedule the
+ * next boundary alarm and broadcast a local "phase changed" signal for any
+ * UI (notification, widget) that wants to refresh without polling. Not a
+ * source of truth — NightToRiseAccessibilityService always recomputes the
+ * live phase itself.
+ */
+public class NightToRisePhaseReceiver extends BroadcastReceiver {
+
+    public static final String ACTION_PHASE_CHANGED =
+            "com.mylifeos.app.rise.nighttorise.PHASE_CHANGED";
+
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        NightToRisePreferences prefs = new NightToRisePreferences(context);
+        if (!prefs.isEnabled()) {
+            return;
+        }
+
+        NightToRiseManager.scheduleNextBoundaryAlarm(context);
+
+        Intent phaseChanged = new Intent(ACTION_PHASE_CHANGED);
+        phaseChanged.setPackage(context.getPackageName());
+        context.sendBroadcast(phaseChanged);
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/plugins/NightToRisePlugin.java===
+package com.mylifeos.app.plugins;
+
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import com.mylifeos.app.rise.nighttorise.NightToRiseManager;
+import com.mylifeos.app.rise.nighttorise.NightToRisePreferences;
+
+import org.json.JSONException;
+
+/**
+ * JS bridge for Sleep to Rise, matching exactly the contract declared in
+ * src/lib/capacitor/nightToRiseBridge.ts:
+ *
+ *   NightToRise.setConfig({ json })
+ *   NightToRise.setRiseAlarm({ epochMillis })
+ *   NightToRise.consumePendingBreak() -> { broke }
+ */
+@CapacitorPlugin(name = "NightToRise")
+public class NightToRisePlugin extends Plugin {
+
+    @PluginMethod
+    public void setConfig(PluginCall call) {
+        String json = call.getString("json");
+        if (json == null) {
+            call.reject("json is required");
+            return;
+        }
+        try {
+            new NightToRisePreferences(getContext()).applyConfigJson(json);
+            NightToRiseManager.scheduleNextBoundaryAlarm(getContext());
+            call.resolve();
+        } catch (JSONException e) {
+            call.reject("Invalid config JSON", e);
+        }
+    }
+
+    @PluginMethod
+    public void setRiseAlarm(PluginCall call) {
+        if (!call.getData().has("epochMillis")) {
+            call.reject("epochMillis is required");
+            return;
+        }
+        // getLong isn't available on PluginCall in older Capacitor versions;
+        // JS numbers arrive as double/int via getData(), so read generically.
+        long epochMillis;
+        Object raw = call.getData().opt("epochMillis");
+        if (raw instanceof Number) {
+            epochMillis = ((Number) raw).longValue();
+        } else {
+            epochMillis = 0L;
+        }
+
+        new NightToRisePreferences(getContext()).setRiseAlarmEpochMillis(epochMillis);
+        NightToRiseManager.scheduleNextBoundaryAlarm(getContext());
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void consumePendingBreak(PluginCall call) {
+        boolean broke = new NightToRisePreferences(getContext()).consumePendingBreak();
+        JSObject result = new JSObject();
+        result.put("broke", broke);
+        call.resolve(result);
+    }
+
+    // --- Not part of the JS bridge contract yet, but useful for a future
+    // permissions row wired specifically to this service (see the note in
+    // NightToRiseAccessibilityService). Safe to call from JS as
+    // NightToRise.isAccessibilityEnabled() if you add it to the TS
+    // interface later. ---
+    @PluginMethod
+    public void isAccessibilityEnabled(PluginCall call) {
+        JSObject result = new JSObject();
+        result.put("enabled", NightToRiseManager.isAccessibilityServiceEnabled(getContext()));
+        call.resolve(result);
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/state/AlarmStateManager.java===
+package com.mylifeos.app.rise.state;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.util.Log;
+
+import com.mylifeos.app.rise.core.AlarmConstants;
+import com.mylifeos.app.rise.nighttorise.NightToRiseManager;
+
+/**
+ * AlarmStateManager — Rise System এর persistent global state manager।
+ *
+ * কেন দরকার?
+ * ─────────────────────────────────────────────────────────────────
+ * Android এ static variables process death এ মরে যায়।
+ * Activity, Service, BroadcastReceiver সবার আলাদা lifecycle।
+ * SharedPreferences disk এ থাকে — app kill / reboot সব survive করে।
+ *
+ * এই class সব Android components এর single source of truth।
+ * JS side ও Capacitor bridge দিয়ে এটা পড়তে পারে।
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * State fields:
+ *   is_ringing       → alarm বাজছে কিনা
+ *   active_uuid      → কোন alarm UUID
+ *   active_id        → numeric alarm id
+ *   mission_done     → mission complete হয়েছে কিনা
+ *   snooze_count     → কতবার snooze হয়েছে
+ *   snooze_max       → maximum allowed snooze
+ *   trigger_time     → alarm কখন trigger হয়েছিল (epoch ms)
+ *   alarm_title      → notification title
+ *   alarm_body       → notification body
+ */
+public class AlarmStateManager {
+
+    private static final String TAG = "AlarmStateManager";
+
+    // ──────────────────────────────────────────────────
+    // WRITE: Alarm trigger হলে call করো
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Alarm trigger হওয়ার সাথে সাথে call করো।
+     * সব state persist করে — দুটো SharedPrefs এ লেখে:
+     *   1. RiseAlarmState   → native layer reads
+     *   2. CapacitorStorage → JS bridge reads
+     */
+    public static void setRinging(Context ctx, int id, String uuid,
+                                   String title, String body, int snoozeMax) {
+        // Native state
+        statePrefs(ctx).edit()
+            .putBoolean(AlarmConstants.KEY_IS_RINGING,   true)
+            .putString(AlarmConstants.KEY_ACTIVE_UUID,   uuid)
+            .putInt(AlarmConstants.KEY_ACTIVE_ID,        id)
+            .putBoolean(AlarmConstants.KEY_MISSION_DONE, false)
+            .putInt(AlarmConstants.KEY_SNOOZE_COUNT,     0)
+            .putInt(AlarmConstants.KEY_SNOOZE_MAX,       snoozeMax)
+            .putLong(AlarmConstants.KEY_TRIGGER_TIME,    System.currentTimeMillis())
+            .putString(AlarmConstants.KEY_ALARM_TITLE,   title != null ? title : "Rise Alarm")
+            .putString(AlarmConstants.KEY_ALARM_BODY,    body  != null ? body  : "Wake up!")
+            .apply();
+
+        // JS bridge state (Capacitor Preferences format)
+        capacitorPrefs(ctx).edit()
+            .putString(AlarmConstants.KEY_CAP_RINGING_ID, uuid)
+            .putString(AlarmConstants.KEY_RAW_RINGING_ID, uuid)
+            .apply();
+
+        Log.d(TAG, "✅ State: RINGING — id=" + id + " uuid=" + uuid);
+    }
+
+    /**
+     * Mission complete বা manual stop হলে call করো।
+     * সব ringing state clear করে।
+     */
+    public static void clearRinging(Context ctx) {
+        statePrefs(ctx).edit()
+            .putBoolean(AlarmConstants.KEY_IS_RINGING,   false)
+            .putBoolean(AlarmConstants.KEY_MISSION_DONE, true)
+            .remove(AlarmConstants.KEY_ACTIVE_UUID)
+            .remove(AlarmConstants.KEY_ACTIVE_ID)
+            .apply();
+
+        capacitorPrefs(ctx).edit()
+            .remove(AlarmConstants.KEY_CAP_RINGING_ID)
+            .remove(AlarmConstants.KEY_RAW_RINGING_ID)
+            .apply();
+
+        // Sleep to Rise: the alarm is now truly off (mission complete or
+        // manual stop) — this is the exact moment Rise Guard should start.
+        NightToRiseManager.onAlarmDismissed(ctx);
+
+        Log.d(TAG, "🔕 State: CLEARED");
+    }
+
+    /**
+     * Snooze হলে call করো।
+     * Count increment করে, ringing false করে (পরের alarm আবার true করবে)।
+     */
+    public static void onSnooze(Context ctx) {
+        int current = getSnoozeCount(ctx);
+        statePrefs(ctx).edit()
+            .putInt(AlarmConstants.KEY_SNOOZE_COUNT, current + 1)
+            .putBoolean(AlarmConstants.KEY_IS_RINGING, false)
+            .apply();
+
+        capacitorPrefs(ctx).edit()
+            .remove(AlarmConstants.KEY_CAP_RINGING_ID)
+            .remove(AlarmConstants.KEY_RAW_RINGING_ID)
+            .apply();
+
+        Log.d(TAG, "😴 Snooze count: " + (current + 1) + "/" + getSnoozeMax(ctx));
+    }
+
+    // ──────────────────────────────────────────────────
+    // READ
+    // ──────────────────────────────────────────────────
+
+    public static boolean isRinging(Context ctx) {
+        return statePrefs(ctx).getBoolean(AlarmConstants.KEY_IS_RINGING, false);
+    }
+
+    public static String getActiveUuid(Context ctx) {
+        String uuid = statePrefs(ctx).getString(AlarmConstants.KEY_ACTIVE_UUID, null);
+        // Fallback: capacitor prefs
+        if (uuid == null) {
+            uuid = capacitorPrefs(ctx).getString(AlarmConstants.KEY_CAP_RINGING_ID, null);
+        }
+        if (uuid == null) {
+            uuid = capacitorPrefs(ctx).getString(AlarmConstants.KEY_RAW_RINGING_ID, null);
+        }
+        return uuid;
+    }
+
+    public static int getActiveId(Context ctx) {
+        return statePrefs(ctx).getInt(AlarmConstants.KEY_ACTIVE_ID, -1);
+    }
+
+    public static boolean isMissionDone(Context ctx) {
+        return statePrefs(ctx).getBoolean(AlarmConstants.KEY_MISSION_DONE, false);
+    }
+
+    public static int getSnoozeCount(Context ctx) {
+        return statePrefs(ctx).getInt(AlarmConstants.KEY_SNOOZE_COUNT, 0);
+    }
+
+    public static int getSnoozeMax(Context ctx) {
+        return statePrefs(ctx).getInt(AlarmConstants.KEY_SNOOZE_MAX, 3);
+    }
+
+    public static long getTriggerTime(Context ctx) {
+        return statePrefs(ctx).getLong(AlarmConstants.KEY_TRIGGER_TIME, 0);
+    }
+
+    public static String getAlarmTitle(Context ctx) {
+        return statePrefs(ctx).getString(AlarmConstants.KEY_ALARM_TITLE, "Rise Alarm");
+    }
+
+    public static String getAlarmBody(Context ctx) {
+        return statePrefs(ctx).getString(AlarmConstants.KEY_ALARM_BODY, "Wake up!");
+    }
+
+    /** Alarm কতক্ষণ ধরে বাজছে (minutes) */
+    public static long getRingingDurationMinutes(Context ctx) {
+        long trigger = getTriggerTime(ctx);
+        if (trigger == 0) return 0;
+        return (System.currentTimeMillis() - trigger) / 60_000L;
+    }
+
+    /** আরো snooze করা যাবে কিনা */
+    public static boolean canSnooze(Context ctx) {
+        return getSnoozeCount(ctx) < getSnoozeMax(ctx);
+    }
+
+    /**
+     * Recovery check — alarm ringing state এ আছে কিন্তু
+     * MAX duration পার হয়ে গেছে → auto-clear করো।
+     */
+    public static boolean shouldAutoStop(Context ctx) {
+        if (!isRinging(ctx)) return false;
+        long durationMin = getRingingDurationMinutes(ctx);
+        boolean expired = durationMin >= 30;
+        if (expired) Log.w(TAG, "⚠️ Alarm ringing for " + durationMin + " min — auto-stop triggered");
+        return expired;
+    }
+
+    // ──────────────────────────────────────────────────
+    // HELPERS
+    // ──────────────────────────────────────────────────
+
+    private static SharedPreferences statePrefs(Context ctx) {
+        return ctx.getSharedPreferences(AlarmConstants.PREFS_RISE_STATE, Context.MODE_PRIVATE);
+    }
+
+    private static SharedPreferences capacitorPrefs(Context ctx) {
+        return ctx.getSharedPreferences(AlarmConstants.PREFS_CAPACITOR, Context.MODE_PRIVATE);
+    }
+}
+
+===ENDFILE===
+===FILE:INTEGRATION.md===
+# Sleep to Rise — integration steps (v2, matches real JS contract)
+
+## 1. AndroidManifest.xml
+Add inside `<application>` (same as before — skip if already added):
+
+```xml
+<service
+    android:name=".rise.nighttorise.NightToRiseAccessibilityService"
+    android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+    android:exported="true">
+    <intent-filter>
+        <action android:name="android.accessibilityservice.AccessibilityService" />
+    </intent-filter>
+    <meta-data
+        android:name="android.accessibilityservice"
+        android:resource="@xml/night_to_rise_accessibility_config" />
+</service>
+
+<activity
+    android:name=".rise.nighttorise.NightToRiseBlockActivity"
+    android:exported="false"
+    android:launchMode="singleTask"
+    android:excludeFromRecents="true"
+    android:theme="@style/Theme.AppCompat.NoActionBar" />
+
+<receiver
+    android:name=".rise.nighttorise.NightToRisePhaseReceiver"
+    android:exported="false" />
+```
+
+## 2. Accessibility service config
+`android/app/src/main/res/xml/night_to_rise_accessibility_config.xml`:
+
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:canRetrieveWindowContent="false"
+    android:description="@string/night_to_rise_accessibility_description" />
+```
+
+## 3. Register the plugin
+`MainActivity.java`:
+```java
+registerPlugin(com.mylifeos.app.plugins.NightToRisePlugin.class);
+```
+(Your last grep found this missing — the plugin is inert until this line is added.)
+
+## 4. Confirmed decisions this build is based on
+- Rise Guard duration: user-configurable (`riseLockMinutesAfter`, already in your `NightToRiseConfig`/UI slider) — not hardcoded.
+- Blocklist: Sleep Guard and Rise Guard share the same `blockedApps` / `allowedApps` / `blocklistMode`.
+- Rise Guard **starts on alarm dismissal**, not at the scheduled alarm clock time — hooked directly into `AlarmStateManager.clearRinging()`. A snooze delays it; an early manual stop starts it early. Sleep Guard's own end time is still the scheduled rise-alarm epoch (matches `useNightToRise.ts`'s existing clock-based math), so there's a small gap between "alarm firing" and "alarm dismissed" where nothing is locked — intentional, so the ringing alarm's own screen isn't blocked.
+
+## 5. Open item — permissions UI accuracy
+`NightToRisePermissions.tsx` checks accessibility status via the existing
+`Shield` plugin (`Shield.checkPermissions().accessibility`), which most
+likely reports on `ShieldAccessibilityService`, not the new standalone
+`NightToRiseAccessibilityService`. Until this is wired up, that row can
+show "granted" while Sleep to Rise's own service is actually off (or vice
+versa). Two ways to fix — tell me which and I'll do it:
+- **(a)** Send `ShieldPlugin.java` and I'll extend `checkPermissions()` to
+  also check `NightToRiseAccessibilityService`.
+- **(b)** Wire the UI to the new `NightToRise.isAccessibilityEnabled()`
+  method (already added to `NightToRisePlugin.java`) instead — needs a
+  small addition to `nightToRiseBridge.ts` + the permissions row.
+
+## 6. Known limitations
+- Native block screen's "Emergency unlock" does **not** check the PIN
+  (`app_lock_pin` lives in web `localStorage`, unreachable from native).
+  It does honor the strict-mode 10-minute cooldown.
+- Native can't show the live streak count on the block screen — the
+  streak lives in a separate localStorage key never pushed to native.
+  `showStreakOnBlock` is read but currently has no number to show; the
+  streak pill is left out of the native screen.
+- Not compiled/tested against your actual Gradle project.
+
+===ENDFILE===

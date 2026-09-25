@@ -1,0 +1,316 @@
+package com.mylifeos.app.shield.core;
+
+import android.app.AppOpsManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.app.Service;
+import android.app.usage.UsageEvents;
+import android.app.usage.UsageStatsManager;
+import android.content.Context;
+import android.content.Intent;
+import android.os.Build;
+import android.os.Handler;
+import android.os.IBinder;
+import android.os.Looper;
+import android.os.Process;
+import android.util.Log;
+
+import androidx.core.app.NotificationCompat;
+
+import com.mylifeos.app.MainActivity;
+import com.mylifeos.app.R;
+import com.mylifeos.app.nighttorise.NightToRiseManager;
+import com.mylifeos.app.shield.ShieldPreferences;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import java.util.Set;
+
+/**
+ * ForegroundGuardService — the reliability layer behind app blocking.
+ *
+ * Why it exists: enforcement used to depend 100% on accessibility events
+ * arriving. They don't, reliably — OEM ROMs coalesce or drop
+ * TYPE_WINDOW_STATE_CHANGED for background listeners, which is why Shield's
+ * Block Apps was flaky and Sleep to Rise never blocked anything system-wide.
+ *
+ * This foreground service:
+ *   • polls the real foreground package once per second (UsageStats, falling
+ *     back to the last package the accessibility service saw) and runs the
+ *     shared {@link BlockEnforcer};
+ *   • keeps a persistent, always-visible notification stating whether the
+ *     Sleep to Rise lock is ACTIVE right now — a trustworthy signal that does
+ *     not depend on the Life OS UI being open.
+ *
+ * It never blocks Life OS itself: {@link BlockEnforcer#isNeverBlockable}
+ * short-circuits our own package before any decision is taken.
+ */
+public class ForegroundGuardService extends Service {
+
+    private static final String TAG = "ForegroundGuard";
+    private static final String CHANNEL_ID = "shield_guard_status";
+    private static final int NOTIF_ID = 4711;
+    private static final long POLL_MS = 1000L;
+
+    /** Synthetic package used to ask the decider for the CURRENT lock phase. */
+    private static final String PROBE_PACKAGE = "zz.lifeos.lock.probe";
+
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private Runnable tick;
+    private String lastNotificationText = null;
+
+    // ---------------------------------------------------------------
+    // Lifecycle helpers
+    // ---------------------------------------------------------------
+
+    /** Starts the guard when there is anything to enforce; stops it otherwise. */
+    public static void sync(Context ctx) {
+        try {
+            boolean n2rOn = new com.mylifeos.app.nighttorise.NightToRisePreferences(ctx).isEnabled();
+            Set<String> blocked = new ShieldPreferences(ctx).getBlockedApps();
+            boolean needed = n2rOn || (blocked != null && !blocked.isEmpty());
+            Intent i = new Intent(ctx, ForegroundGuardService.class);
+            if (needed) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) ctx.startForegroundService(i);
+                else ctx.startService(i);
+            } else {
+                ctx.stopService(i);
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "sync failed", t);
+        }
+    }
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        createChannel();
+        startForeground(NOTIF_ID, buildNotification("Protection active", "Checking your lock schedule…"));
+        tick = new Runnable() {
+            @Override public void run() {
+                try { pass(); } catch (Throwable t) { Log.w(TAG, "guard pass failed", t); }
+                handler.postDelayed(this, POLL_MS);
+            }
+        };
+        handler.post(tick);
+    }
+
+    @Override
+    public int onStartCommand(Intent intent, int flags, int startId) {
+        return START_STICKY;
+    }
+
+    @Override
+    public void onDestroy() {
+        if (tick != null) handler.removeCallbacks(tick);
+        super.onDestroy();
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) { return null; }
+
+    // ---------------------------------------------------------------
+    // Core loop
+    // ---------------------------------------------------------------
+
+    private void pass() {
+        NightToRiseManager n2r = new NightToRiseManager(this);
+        NightToRiseManager.Decision probe = n2r.decide(System.currentTimeMillis(), PROBE_PACKAGE);
+        String pkg = currentForegroundPackage();
+        boolean accessibilityAvailable =
+            com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()
+            || new com.mylifeos.app.shield.ShieldPermissionHelper(this).hasAccessibilityPermission();
+        BlockEnforcer.noteGuardPass(probe.phase.name(), probe.shouldBlock, pkg,
+            hasUsageAccess(), accessibilityAvailable);
+        updateNotification(probe, pkg != null && canLeaveApp());
+        if (pkg == null) {
+            if (probe.shouldBlock) Log.w(TAG, "Lock active but no foreground-app signal is available");
+            return;
+        }
+        BlockEnforcer.enforce(this, pkg, this::goHome);
+    }
+
+    /**
+     * True when we can actually pull the user out of a blocked app. Background
+     * activity starts from a service are dropped on Android 10+, so without the
+     * accessibility service (or overlay permission) a "lock" can never enforce.
+     */
+    private boolean canLeaveApp() {
+        if (com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()) return true;
+        try {
+            return Build.VERSION.SDK_INT < Build.VERSION_CODES.Q
+                || android.provider.Settings.canDrawOverlays(this);
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private void goHome() {
+        // Accessibility first: it is the only path that reliably works from the
+        // background on Android 10+.
+        if (com.mylifeos.app.shield.ShieldAccessibilityService.goHomeViaAccessibility()) return;
+        try {
+            Intent home = new Intent(Intent.ACTION_MAIN);
+            home.addCategory(Intent.CATEGORY_HOME);
+            home.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            startActivity(home);
+        } catch (Throwable t) {
+            Log.w(TAG, "goHome intent rejected (background activity start)", t);
+        }
+    }
+
+    /** Cached long-window foreground lookup (see currentForegroundPackage). */
+    private String cachedLongWindowPkg = null;
+    private long cachedLongWindowAt = 0L;
+
+    /**
+     * Real foreground package. UsageStats is the source of truth when the
+     * permission is granted; otherwise we fall back to the last package the
+     * accessibility service reported.
+     *
+     * Root cause fixed here: the query only looked 10 seconds back, so when a
+     * lock window OPENED while an app was already on screen (the normal case —
+     * 22:00 arrives while scrolling) there was no recent resume event, the poll
+     * saw "no foreground app", and nothing was ever blocked.
+     */
+    private String currentForegroundPackage() {
+        if (hasUsageAccess()) {
+            String recent = lastResumedSince(10_000L);
+            if (recent != null) return recent;
+            long now = System.currentTimeMillis();
+            if (cachedLongWindowPkg == null || now - cachedLongWindowAt > 10_000L) {
+                cachedLongWindowPkg = lastResumedSince(6L * 60 * 60 * 1000);
+                cachedLongWindowAt = now;
+            }
+            if (cachedLongWindowPkg != null) return cachedLongWindowPkg;
+        }
+        // Fallback: accessibility-reported foreground, if recent enough.
+        if (BlockEnforcer.lastForegroundAgeMs() < 60_000) return BlockEnforcer.lastForegroundPackage();
+        return null;
+    }
+
+    /** Last package resumed within the given lookback window, or null. */
+    private String lastResumedSince(long lookbackMs) {
+        try {
+            UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) return null;
+            long now = System.currentTimeMillis();
+            UsageEvents events = usm.queryEvents(now - lookbackMs, now);
+            UsageEvents.Event e = new UsageEvents.Event();
+            String last = null;
+            while (events != null && events.hasNextEvent()) {
+                events.getNextEvent(e);
+                int type = e.getEventType();
+                boolean resumed = type == UsageEvents.Event.MOVE_TO_FOREGROUND
+                    || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                        && type == UsageEvents.Event.ACTIVITY_RESUMED);
+                if (resumed) last = e.getPackageName();
+            }
+            return last;
+        } catch (Throwable t) {
+            Log.w(TAG, "usage query failed", t);
+            return null;
+        }
+    }
+
+
+    private boolean hasUsageAccess() {
+        try {
+            AppOpsManager ops = (AppOpsManager) getSystemService(Context.APP_OPS_SERVICE);
+            if (ops == null) return false;
+            int mode;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                mode = ops.unsafeCheckOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    Process.myUid(), getPackageName());
+            } else {
+                mode = ops.checkOpNoThrow(AppOpsManager.OPSTR_GET_USAGE_STATS,
+                    Process.myUid(), getPackageName());
+            }
+            return mode == AppOpsManager.MODE_ALLOWED;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Notification (the "is the lock really on?" signal)
+    // ---------------------------------------------------------------
+
+    private void updateNotification(NightToRiseManager.Decision probe, boolean canEnforce) {
+        String title;
+        String text;
+
+        boolean locking = probe.shouldBlock;
+        if (locking && !canEnforce) {
+            title = "Sleep to Rise — permission needed";
+            text = "Grant Usage Access or Accessibility to enforce this lock";
+        } else if (locking) {
+            String until = probe.endTimeMs > 0
+                ? new SimpleDateFormat("h:mm a", Locale.getDefault()).format(new Date(probe.endTimeMs))
+                : null;
+            title = probe.phase == NightToRiseManager.Phase.RISE_LOCK
+                ? "🌅 Sleep to Rise — rise lock ACTIVE"
+                : "🌙 Sleep to Rise — sleep lock ACTIVE";
+            text = "Only your allowed apps can open"
+                + (until != null ? " · until " + until : "");
+        } else {
+            int blockedCount = 0;
+            try {
+                Set<String> blocked = new ShieldPreferences(this).getBlockedApps();
+                blockedCount = blocked == null ? 0 : blocked.size();
+            } catch (Throwable ignored) {}
+            switch (probe.phase) {
+                case PAUSED:       title = "Sleep to Rise — paused tonight"; break;
+                case INACTIVE_DAY: title = "Sleep to Rise — not scheduled today"; break;
+                case OFF:          title = "Shield protection running"; break;
+                default:           title = "Sleep to Rise — armed"; break;
+            }
+            text = blockedCount > 0
+                ? blockedCount + " app" + (blockedCount == 1 ? "" : "s") + " blocked by Shield"
+                : "Lock is not enforcing right now";
+        }
+
+        String signature = title + "|" + text;
+        if (signature.equals(lastNotificationText)) return;
+        lastNotificationText = signature;
+
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm != null) nm.notify(NOTIF_ID, buildNotification(title, text));
+    }
+
+    private Notification buildNotification(String title, String text) {
+        Intent open = new Intent(this, MainActivity.class);
+        open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        PendingIntent pi = PendingIntent.getActivity(
+            this, 0, open,
+            PendingIntent.FLAG_UPDATE_CURRENT
+                | (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0));
+
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_shield)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(text))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setShowWhen(false)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setContentIntent(pi)
+            .build();
+    }
+
+    private void createChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return;
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (nm == null) return;
+        NotificationChannel ch = new NotificationChannel(
+            CHANNEL_ID, "Blocking status", NotificationManager.IMPORTANCE_LOW);
+        ch.setDescription("Shows whether Sleep to Rise / Shield blocking is currently enforcing");
+        ch.setShowBadge(false);
+        nm.createNotificationChannel(ch);
+    }
+}

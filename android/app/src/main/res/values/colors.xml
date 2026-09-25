@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Alarm ring experience — matches the React ring screen so a cold start
+         never flashes white before the WebView paints. -->
+    <color name="alarm_bg_top">#1A0F0A</color>
+    <color name="alarm_bg_bottom">#0B0A10</color>
+    <color name="alarm_bg_solid">#120C10</color>
+</resources>

@@ -1,0 +1,2578 @@
+===FILE:src/components/rise/night-to-rise/NightToRisePage.tsx===
+import { useState } from 'react';
+import { ArrowLeft, Moon, Sunrise, Smartphone, MessageSquare, CalendarDays, Plus, X, PauseCircle, Shield, Ban, BarChart3 } from 'lucide-react';
+import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
+import { Slider } from '@/components/ui/slider';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import { useNightToRise } from './useNightToRise';
+import { NightToRiseBlocklist } from './NightToRiseBlocklist';
+import { NightToRiseInsights } from './NightToRiseInsights';
+import { InstalledAppPicker } from './InstalledAppPicker';
+import { ScheduleMode, ALWAYS_ALLOWED_IDS } from './types';
+
+interface Props {
+  open: boolean;
+  onClose: () => void;
+  riseAlarmTime?: string | null;
+}
+
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+export function NightToRisePage({ open, onClose, riseAlarmTime }: Props) {
+  const { config, update, status, pauseTonight, canPauseTonight } = useNightToRise(riseAlarmTime);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const toggleDay = (d: number) => {
+    const set = new Set(config.scheduleDays);
+    set.has(d) ? set.delete(d) : set.add(d);
+    update({ scheduleDays: Array.from(set).sort() });
+  };
+
+  const removeApp = (id: string) =>
+    update({ allowedApps: config.allowedApps.filter((a) => a.id !== id) });
+
+  const handlePause = () => {
+    const ok = pauseTonight();
+    if (ok) toast.success('Paused for tonight');
+    else toast.error('You have already used your pause for this week');
+  };
+
+  return (
+    <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
+      <SheetContent side="bottom" className="h-[95vh] overflow-y-auto p-0">
+        {/* Header */}
+        <div className="sticky top-0 z-10 bg-gradient-to-br from-indigo-950 via-slate-900 to-purple-950 px-4 py-4 text-white">
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="rounded-lg p-1.5 hover:bg-white/10">
+              <ArrowLeft className="h-5 w-5" />
+            </button>
+            <div className="flex-1">
+              <h2 className="text-lg font-semibold">Sleep to Rise</h2>
+              <p className="text-xs text-indigo-200/80">Sleep & Wake Protection</p>
+            </div>
+            <Switch
+              checked={config.enabled}
+              onCheckedChange={(v) => update({ enabled: v })}
+            />
+          </div>
+          {status.phase !== 'off' && (
+            <div className="mt-3 inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-xs">
+              <span className={cn(
+                'h-2 w-2 rounded-full',
+                status.phase === 'sleep-lock' || status.phase === 'rise-lock' ? 'bg-emerald-400 animate-pulse' :
+                status.phase === 'paused' ? 'bg-amber-400' : 'bg-indigo-300',
+              )} />
+              {status.label ?? 'Armed'}
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-4 p-4">
+          {/* Sleep Guard */}
+          <Section icon={<Moon className="h-4 w-4" />} title="Sleep Guard" subtitle="Lock distracting apps before bed">
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Target sleep time</Label>
+                <Input
+                  type="time"
+                  value={config.sleepTime}
+                  onChange={(e) => update({ sleepTime: e.target.value })}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <Label className="text-xs">Lock starts before sleep</Label>
+                  <span className="text-xs font-medium text-primary">{config.sleepLockMinutesBefore} min</span>
+                </div>
+                <Slider
+                  min={0} max={120} step={5}
+                  value={[config.sleepLockMinutesBefore]}
+                  onValueChange={([v]) => update({ sleepLockMinutesBefore: v })}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* Rise Guard */}
+          <Section icon={<Sunrise className="h-4 w-4" />} title="Rise Guard" subtitle="Stay focused after waking up">
+            <div className="space-y-3">
+              <div className="rounded-lg bg-muted/50 p-3 text-xs">
+                <span className="text-muted-foreground">Alarm time: </span>
+                <span className="font-medium">{riseAlarmTime ?? 'No alarm set'}</span>
+              </div>
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <Label className="text-xs">Lock stays for</Label>
+                  <span className="text-xs font-medium text-primary">{config.riseLockMinutesAfter} min</span>
+                </div>
+                <Slider
+                  min={5} max={120} step={5}
+                  value={[config.riseLockMinutesAfter]}
+                  onValueChange={([v]) => update({ riseLockMinutesAfter: v })}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* Allowed Apps */}
+          <Section icon={<Smartphone className="h-4 w-4" />} title="Allowed Apps" subtitle="These work during locked windows">
+            <div className="space-y-3">
+              <div className="flex flex-wrap gap-2">
+                {config.allowedApps.map((a) => (
+                  <div key={a.id} className="group inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary">
+                    {a.name}
+                    <button onClick={() => removeApp(a.id)} className="opacity-60 hover:opacity-100">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <Button variant="outline" className="w-full" onClick={() => setPickerOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" /> Choose allowed apps
+              </Button>
+              <p className="text-[11px] text-muted-foreground">
+                Phone, Clock and Emergency are always allowed.
+              </p>
+              <InstalledAppPicker
+                open={pickerOpen}
+                title="Allowed apps"
+                selected={config.allowedApps.map((a) => a.id)}
+                lockedIds={ALWAYS_ALLOWED_IDS}
+                onClose={() => setPickerOpen(false)}
+                onSave={(apps) => { update({ allowedApps: apps }); setPickerOpen(false); }}
+              />
+            </div>
+          </Section>
+
+          {/* Blocklist — PHASE 2 */}
+          <Section icon={<Ban className="h-4 w-4" />} title="Blocklist" subtitle="Apps, sites & keywords locked during windows">
+            <NightToRiseBlocklist config={config} update={update} />
+          </Section>
+
+          {/* Block Screen */}
+          <Section icon={<MessageSquare className="h-4 w-4" />} title="Block Screen" subtitle="Customize the lock messages">
+            <div className="space-y-3">
+              <div>
+                <Label className="text-xs">Sleep window message</Label>
+                <Textarea
+                  value={config.sleepBlockMessage}
+                  onChange={(e) => update({ sleepBlockMessage: e.target.value })}
+                  rows={2}
+                  className="mt-1 resize-none"
+                />
+              </div>
+              <div>
+                <Label className="text-xs">Rise window message</Label>
+                <Textarea
+                  value={config.riseBlockMessage}
+                  onChange={(e) => update({ riseBlockMessage: e.target.value })}
+                  rows={2}
+                  className="mt-1 resize-none"
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg bg-muted/40 p-3">
+                <div>
+                  <p className="text-sm font-medium">Show streak on block screen</p>
+                  <p className="text-xs text-muted-foreground">"7 mornings protected in a row 🔥"</p>
+                </div>
+                <Switch
+                  checked={config.showStreakOnBlock}
+                  onCheckedChange={(v) => update({ showStreakOnBlock: v })}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* Schedule */}
+          <Section icon={<CalendarDays className="h-4 w-4" />} title="Schedule" subtitle="When Sleep to Rise runs">
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                {(['everyday', 'weekdays', 'custom'] as ScheduleMode[]).map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => update({ scheduleMode: m })}
+                    className={cn(
+                      'rounded-lg border px-2 py-2 text-xs font-medium capitalize transition-colors',
+                      config.scheduleMode === m
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'border-border text-muted-foreground hover:bg-muted/50',
+                    )}
+                  >{m}</button>
+                ))}
+              </div>
+              {config.scheduleMode === 'custom' && (
+                <div className="flex gap-1">
+                  {DAYS.map((d, i) => (
+                    <button
+                      key={d}
+                      onClick={() => toggleDay(i)}
+                      className={cn(
+                        'flex-1 rounded-md border py-2 text-[11px] font-medium transition-colors',
+                        config.scheduleDays.includes(i)
+                          ? 'border-primary bg-primary/10 text-primary'
+                          : 'border-border text-muted-foreground',
+                      )}
+                    >{d}</button>
+                  ))}
+                </div>
+              )}
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={!canPauseTonight}
+                onClick={handlePause}
+              >
+                <PauseCircle className="mr-2 h-4 w-4" />
+                {canPauseTonight ? 'Pause for one night' : 'Weekly pause already used'}
+              </Button>
+              {!canPauseTonight && (
+                <p className="text-center text-[11px] text-muted-foreground">
+                  You can pause Sleep to Rise once per week. It resets next Monday.
+                </p>
+              )}
+              <div className="flex items-center justify-between rounded-lg bg-muted/40 p-3">
+                <div className="flex items-center gap-2">
+                  <Shield className="h-4 w-4 text-destructive" />
+                  <div>
+                    <p className="text-sm font-medium">Strict mode</p>
+                    <p className="text-xs text-muted-foreground">No PIN override allowed</p>
+                  </div>
+                </div>
+                <Switch
+                  checked={config.strictMode}
+                  onCheckedChange={(v) => update({ strictMode: v })}
+                />
+              </div>
+            </div>
+          </Section>
+
+          {/* Insights & Recap — PHASE 3 */}
+          <Section icon={<BarChart3 className="h-4 w-4" />} title="Insights & Recap" subtitle="Streaks, weekly recap and group sharing">
+            <NightToRiseInsights config={config} update={update} />
+          </Section>
+
+          <div className="h-4" />
+        </div>
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+function Section({ icon, title, subtitle, children }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <span className="text-primary">{icon}</span>
+          {title}
+        </CardTitle>
+        <p className="text-xs text-muted-foreground">{subtitle}</p>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
+  );
+}
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/NightToRiseGuard.tsx===
+/**
+ * NightToRiseGuard — global full-screen overlay shown whenever the Night-to-Rise
+ * lock window is active. Mounted once at the App root. Reads config from
+ * localStorage via useNightToRise and the next rise alarm from local_alarms.
+ *
+ * PHASE 2: Strict mode is now fully enforced — instead of hiding the override,
+ * it puts the emergency unlock behind a 10 minute cool-down, so a sleepy tap
+ * can never break the night, but a real emergency is never locked out.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Lock, Smartphone, ShieldOff, Flame, Sparkles, Hourglass } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { useNightToRise } from './useNightToRise';
+import { useNightToRiseStreak } from './useNightToRiseStreak';
+import { nightToRiseBridge } from '@/lib/capacitor/nightToRiseBridge';
+import { STRICT_UNLOCK_DELAY_MS } from './types';
+import { cn } from '@/lib/utils';
+
+function readNextAlarmTime(): string | null {
+  try {
+    const raw = localStorage.getItem('local_alarms');
+    if (!raw) return null;
+    const list = JSON.parse(raw) as Array<{ enabled?: boolean; time?: string }>;
+    const found = list.find((a) => a.enabled && a.time);
+    return found?.time ?? null;
+  } catch { return null; }
+}
+
+const EXEMPT_ROUTES = ['/rise/ring', '/auth', '/reset-password'];
+const STRICT_REQUEST_KEY = 'night_to_rise_strict_request_at';
+
+export function NightToRiseGuard() {
+  const { pathname } = useLocation();
+  const [alarmTime, setAlarmTime] = useState<string | null>(readNextAlarmTime);
+  const { config, status } = useNightToRise(alarmTime);
+  const { streak, recordBreak, recordCleanNight } = useNightToRiseStreak();
+  const [now, setNow] = useState(new Date());
+  const [overridden, setOverridden] = useState(false);
+  const [pinInput, setPinInput] = useState('');
+  const [showPin, setShowPin] = useState(false);
+  const [strictRequestedAt, setStrictRequestedAt] = useState<number | null>(() => {
+    const raw = localStorage.getItem(STRICT_REQUEST_KEY);
+    const n = raw ? Number(raw) : 0;
+    return n > 0 ? n : null;
+  });
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === 'local_alarms') setAlarmTime(readNextAlarmTime());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  // Pick up breaks that happened on the NATIVE block screen.
+  useEffect(() => {
+    const checkPendingBreak = async () => {
+      const broke = await nightToRiseBridge.consumePendingBreak();
+      if (broke) recordBreak();
+    };
+    void checkPendingBreak();
+
+    const onVisibility = () => {
+      if (!document.hidden) void checkPendingBreak();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [recordBreak]);
+
+  const isExempt = EXEMPT_ROUTES.some((r) => pathname.startsWith(r));
+  const phase = status.phase;
+  const isLocked = (phase === 'sleep-lock' || phase === 'rise-lock') && !isExempt && !overridden;
+
+  // When phase transitions off after a lock, record a clean night.
+  useEffect(() => {
+    if (phase === 'armed' || phase === 'off' || phase === 'inactive-day') {
+      if (alarmTime) recordCleanNight();
+    }
+  }, [phase, alarmTime, recordCleanNight]);
+
+  // Reset override + strict request when the window ends.
+  useEffect(() => {
+    if (!isLocked) {
+      setOverridden(false);
+      setShowPin(false);
+      setPinInput('');
+      setStrictRequestedAt(null);
+      try { localStorage.removeItem(STRICT_REQUEST_KEY); } catch { /* noop */ }
+    }
+  }, [isLocked]);
+
+  const message = phase === 'sleep-lock' ? config.sleepBlockMessage : config.riseBlockMessage;
+
+  const endTime = useMemo(() => {
+    if (phase === 'sleep-lock') {
+      const [h, m] = config.sleepTime.split(':').map(Number);
+      const end = new Date();
+      end.setHours(h, m + 30, 0, 0);
+      if (end < now) end.setDate(end.getDate() + 1);
+      return end;
+    }
+    if (phase === 'rise-lock' && alarmTime) {
+      const [h, m] = alarmTime.split(':').map(Number);
+      const end = new Date();
+      end.setHours(h, m + config.riseLockMinutesAfter, 0, 0);
+      if (end < now) end.setDate(end.getDate() + 1);
+      return end;
+    }
+    return null;
+  }, [phase, alarmTime, config, now]);
+
+  const remaining = endTime ? Math.max(0, Math.floor((endTime.getTime() - now.getTime()) / 1000)) : 0;
+  const hh = Math.floor(remaining / 3600);
+  const mm = Math.floor((remaining % 3600) / 60);
+  const ss = remaining % 60;
+  const countdown = hh > 0
+    ? `${hh}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`
+    : `${mm}:${String(ss).padStart(2, '0')}`;
+
+  // ---- Strict mode: 10 minute delayed emergency unlock ----
+  const strictWaitMs = strictRequestedAt
+    ? Math.max(0, strictRequestedAt + STRICT_UNLOCK_DELAY_MS - now.getTime())
+    : STRICT_UNLOCK_DELAY_MS;
+  const strictReady = strictRequestedAt !== null && strictWaitMs === 0;
+  const strictWaitLabel = `${Math.floor(strictWaitMs / 60000)}:${String(Math.floor((strictWaitMs % 60000) / 1000)).padStart(2, '0')}`;
+
+  const requestStrictUnlock = useCallback(() => {
+    const ts = Date.now();
+    setStrictRequestedAt(ts);
+    try { localStorage.setItem(STRICT_REQUEST_KEY, String(ts)); } catch { /* noop */ }
+  }, []);
+
+  const canOverrideNow = !config.strictMode || strictReady;
+
+  const handleEmergencyUnlock = () => {
+    if (!canOverrideNow) return;
+    // PIN: stored at 'app_lock_pin'; fall back to allowing override without PIN
+    let storedPin: string | null = null;
+    try { storedPin = localStorage.getItem('app_lock_pin'); } catch { /* noop */ }
+    if (storedPin && pinInput !== storedPin) return;
+    recordBreak();
+    setOverridden(true);
+    try { localStorage.removeItem(STRICT_REQUEST_KEY); } catch { /* noop */ }
+  };
+
+  if (!isLocked) return null;
+
+  const dawn = phase === 'rise-lock';
+
+  return (
+    <div className="n2r fixed inset-0 z-[200] flex flex-col overflow-y-auto" data-phase={phase}>
+      {dawn ? (
+        <div
+          className="n2r-dawn-glow pointer-events-none absolute -bottom-32 left-1/2 h-96 w-[130%] -translate-x-1/2 rounded-full bg-warning/30 blur-3xl"
+        />
+      ) : (
+        <div
+          className="pointer-events-none absolute -top-24 left-1/2 h-80 w-[120%] -translate-x-1/2 rounded-full bg-primary/20 blur-3xl"
+        />
+      )}
+
+      <div className="relative flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
+        <div
+          className={cn(
+            'mb-6 flex h-16 w-16 items-center justify-center rounded-3xl',
+            dawn ? 'bg-warning/15 text-warning' : 'bg-primary/10 text-primary',
+          )}
+        >
+          <Lock className="h-7 w-7" />
+        </div>
+
+        <h1 className="n2r-display text-3xl leading-tight">{dawn ? 'Ease into the day' : 'Rest now'}</h1>
+        <p className="mt-3 max-w-sm text-base text-muted-foreground">{message}</p>
+
+        <div className="mt-8">
+          <div className="text-overline">Ends in</div>
+          <div className="n2r-mono mt-2 text-5xl font-bold">{countdown}</div>
+        </div>
+
+        {config.showStreakOnBlock && streak > 0 && (
+          <div className="n2r-pill mt-6" data-tone="dawn">
+            <Flame className="n2r-flame h-4 w-4" /> {streak} night{streak === 1 ? '' : 's'} protected
+          </div>
+        )}
+
+        {config.allowedApps.length > 0 && (
+          <div className="mt-8 w-full max-w-sm">
+            <div className="mb-2 text-overline">Still available</div>
+            <div className="flex flex-wrap justify-center gap-2">
+              {config.allowedApps.map((a) => (
+                <span key={a.id} className="n2r-pill">
+                  <Smartphone className="h-3 w-3" /> {a.name}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="relative px-6 pb-9">
+        {config.strictMode && !strictReady ? (
+          strictRequestedAt === null ? (
+            <div className="mx-auto flex max-w-xs flex-col items-center gap-3">
+              <div className="n2r-pill">
+                <ShieldOff className="h-3 w-3" /> Strict mode is on
+              </div>
+              <button
+                onClick={requestStrictUnlock}
+                className="text-xs text-muted-foreground underline-offset-4 hover:underline"
+              >
+                Request emergency unlock (10 min wait)
+              </button>
+            </div>
+          ) : (
+            <div className="mx-auto flex max-w-xs flex-col items-center gap-2">
+              <div className="n2r-pill">
+                <Hourglass className="h-3 w-3" /> Unlock available in{' '}
+                <span className="n2r-mono font-semibold">{strictWaitLabel}</span>
+              </div>
+              <p className="text-center text-[11px] text-muted-foreground">
+                Take the ten minutes. Most urges are gone by then.
+              </p>
+            </div>
+          )
+        ) : showPin ? (
+          <div className="mx-auto max-w-xs space-y-2">
+            <input
+              type="password"
+              inputMode="numeric"
+              placeholder="Emergency PIN"
+              value={pinInput}
+              onChange={(e) => setPinInput(e.target.value)}
+              className="n2r-mono w-full rounded-xl border border-border bg-muted/40 px-4 py-3 text-center text-lg tracking-widest text-foreground placeholder:text-muted-foreground"
+            />
+            <div className="flex gap-2">
+              <Button variant="ghost" className="flex-1" onClick={() => { setShowPin(false); setPinInput(''); }}>Cancel</Button>
+              <Button className="flex-1" onClick={handleEmergencyUnlock}>Unlock</Button>
+            </div>
+            <p className="text-center text-[11px] text-muted-foreground">
+              Unlocking now starts your streak over. That's alright.
+            </p>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowPin(true)}
+            className="mx-auto block text-xs text-muted-foreground underline-offset-4 hover:underline"
+          >
+            Emergency unlock
+          </button>
+        )}
+
+        <p className="mt-4 text-center text-[11px] text-muted-foreground">
+          Phone and emergency calls are always reachable.
+        </p>
+        <div className="mt-3 flex items-center justify-center gap-1.5 text-overline opacity-60">
+          <Sparkles className="h-3 w-3" /> Sleep to Rise
+        </div>
+      </div>
+    </div>
+  );
+}
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/NightToRiseCard.tsx===
+import { Moon, ChevronRight, Lock } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { useNightToRise } from './useNightToRise';
+
+interface Props {
+  onOpen: () => void;
+  riseAlarmTime?: string | null;
+}
+
+function fmt12(t: string) {
+  const [h, m] = t.split(':').map(Number);
+  const period = h >= 12 ? 'PM' : 'AM';
+  const hh = ((h + 11) % 12) + 1;
+  return `${hh}:${String(m).padStart(2, '0')} ${period}`;
+}
+
+export function NightToRiseCard({ onOpen, riseAlarmTime }: Props) {
+  const { config, status } = useNightToRise(riseAlarmTime);
+
+  const isLocked = status.phase === 'sleep-lock' || status.phase === 'rise-lock';
+  const showPulse = !config.configured;
+
+  return (
+    <button
+      onClick={onOpen}
+      className={cn(
+        'group relative w-full overflow-hidden rounded-2xl text-left',
+        'bg-gradient-to-br from-indigo-950 via-slate-900 to-purple-950',
+        'border border-indigo-500/20 shadow-lg',
+        'p-4 transition-all hover:shadow-xl hover:border-indigo-400/40',
+      )}
+    >
+      <div className="pointer-events-none absolute -top-12 -right-12 h-40 w-40 rounded-full bg-indigo-500/20 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-12 -left-12 h-32 w-32 rounded-full bg-purple-500/20 blur-3xl" />
+
+      <div className="relative flex items-start gap-3">
+        <div className={cn(
+          'flex h-11 w-11 shrink-0 items-center justify-center rounded-xl',
+          'bg-gradient-to-br from-indigo-500/30 to-purple-500/30 ring-1 ring-indigo-300/30',
+          showPulse && 'animate-pulse',
+        )}>
+          <Moon className="h-5 w-5 text-indigo-200" />
+        </div>
+
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-semibold text-white">Sleep to Rise</h3>
+              <p className="text-xs text-indigo-200/70">Sleep & Wake Protection</p>
+            </div>
+            <StatusPill phase={status.phase} configured={config.configured} enabled={config.enabled} />
+          </div>
+
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-xs text-indigo-100/80">
+              {!config.configured
+                ? 'Tap to set up'
+                : isLocked
+                  ? <span className="inline-flex items-center gap-1 font-medium text-emerald-300"><Lock className="h-3 w-3" /> Lock active now</span>
+                  : `Sleep ${fmt12(config.sleepTime)} · Rise +${config.riseLockMinutesAfter}m`}
+            </p>
+            <ChevronRight className="h-4 w-4 text-indigo-200/70 transition-transform group-hover:translate-x-0.5" />
+          </div>
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function StatusPill({ phase, configured, enabled }: { phase: string; configured: boolean; enabled: boolean }) {
+  if (!configured) {
+    return <span className="rounded-full bg-indigo-400/20 px-2 py-0.5 text-[10px] font-semibold text-indigo-100">Set up</span>;
+  }
+  if (!enabled) {
+    return <span className="rounded-full bg-slate-500/30 px-2 py-0.5 text-[10px] font-semibold text-slate-200">Off</span>;
+  }
+  if (phase === 'sleep-lock' || phase === 'rise-lock') {
+    return <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-400/40">Locked</span>;
+  }
+  if (phase === 'paused') {
+    return <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold text-amber-200">Paused</span>;
+  }
+  return <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 ring-1 ring-emerald-400/40">Active</span>;
+}
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/NightToRiseBlocklist.tsx===
+/**
+ * PHASE 2 — Blocklist section for Sleep to Rise.
+ * Lets the user choose the enforcement strategy, pick distraction apps from a
+ * suggested list (or add custom ones), and block distracting sites/keywords.
+ */
+import { useState } from 'react';
+import { Ban, Plus, X, Globe, Search, ShieldAlert } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
+import {
+  AllowedApp,
+  NightToRiseConfig,
+  SUGGESTED_BLOCK_APPS,
+  SUGGESTED_BLOCK_SITES,
+  ALWAYS_ALLOWED_IDS,
+} from './types';
+import { InstalledAppPicker } from './InstalledAppPicker';
+
+interface Props {
+  config: NightToRiseConfig;
+  update: (patch: Partial<NightToRiseConfig>) => void;
+}
+
+function normalizeSite(v: string) {
+  return v.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/.*$/, '');
+}
+
+export function NightToRiseBlocklist({ config, update }: Props) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [customSite, setCustomSite] = useState('');
+  const [customKeyword, setCustomKeyword] = useState('');
+
+  const isBlocked = (id: string) => config.blockedApps.some((a) => a.id === id);
+
+  const toggleApp = (app: AllowedApp) => {
+    if (ALWAYS_ALLOWED_IDS.includes(app.id)) return;
+    update({
+      blockedApps: isBlocked(app.id)
+        ? config.blockedApps.filter((a) => a.id !== app.id)
+        : [...config.blockedApps, app],
+    });
+  };
+
+  const addSite = (raw: string) => {
+    const site = normalizeSite(raw);
+    if (!site || config.blockedSites.includes(site)) return;
+    update({ blockedSites: [...config.blockedSites, site] });
+  };
+
+  const addKeyword = () => {
+    const kw = customKeyword.trim().toLowerCase();
+    if (!kw || config.blockedKeywords.includes(kw)) return;
+    update({ blockedKeywords: [...config.blockedKeywords, kw] });
+    setCustomKeyword('');
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Enforcement mode */}
+      <div>
+        <Label className="text-xs">Enforcement</Label>
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {([
+            { key: 'blocklist', title: 'Blocklist', desc: 'Only these apps lock' },
+            { key: 'allowlist', title: 'Allowlist', desc: 'Lock everything else' },
+          ] as const).map((m) => (
+            <button
+              key={m.key}
+              onClick={() => update({ blocklistMode: m.key })}
+              className={cn(
+                'rounded-lg border px-3 py-2 text-left transition-colors',
+                config.blocklistMode === m.key
+                  ? 'border-primary bg-primary/10'
+                  : 'border-border hover:bg-muted/50',
+              )}
+            >
+              <p className={cn('text-xs font-semibold', config.blocklistMode === m.key && 'text-primary')}>{m.title}</p>
+              <p className="text-[11px] text-muted-foreground">{m.desc}</p>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Suggested distraction apps */}
+      <div>
+        <div className="mb-2 flex items-center justify-between">
+          <Label className="text-xs">Distraction apps</Label>
+          <span className="text-[11px] text-muted-foreground">{config.blockedApps.length} blocked</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {SUGGESTED_BLOCK_APPS.map((app) => (
+            <button
+              key={app.id}
+              onClick={() => toggleApp(app)}
+              className={cn(
+                'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                isBlocked(app.id)
+                  ? 'border-destructive/40 bg-destructive/10 text-destructive'
+                  : 'border-border text-muted-foreground hover:bg-muted/50',
+              )}
+            >
+              {app.name}
+            </button>
+          ))}
+        </div>
+
+        {/* Custom blocked apps */}
+        {config.blockedApps.filter((a) => !SUGGESTED_BLOCK_APPS.some((s) => s.id === a.id)).length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {config.blockedApps
+              .filter((a) => !SUGGESTED_BLOCK_APPS.some((s) => s.id === a.id))
+              .map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive">
+                  {a.name}
+                  <button onClick={() => toggleApp(a)} className="opacity-60 hover:opacity-100">
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+          </div>
+        )}
+
+        <Button variant="outline" className="mt-3 w-full" onClick={() => setPickerOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" /> Choose apps from phone
+        </Button>
+        <InstalledAppPicker
+          open={pickerOpen}
+          title="Apps to block"
+          selected={config.blockedApps.map((a) => a.id)}
+          onClose={() => setPickerOpen(false)}
+          onSave={(apps) => {
+            update({ blockedApps: apps.filter((a) => !ALWAYS_ALLOWED_IDS.includes(a.id)) });
+            setPickerOpen(false);
+          }}
+        />
+      </div>
+
+      {/* Blocked sites */}
+      <div>
+        <Label className="flex items-center gap-1.5 text-xs">
+          <Globe className="h-3.5 w-3.5" /> Blocked sites
+        </Label>
+        <div className="mt-2 flex flex-wrap gap-2">
+          {SUGGESTED_BLOCK_SITES.filter((s) => !config.blockedSites.includes(s)).map((s) => (
+            <button
+              key={s}
+              onClick={() => addSite(s)}
+              className="rounded-full border border-dashed border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-muted/50"
+            >
+              + {s}
+            </button>
+          ))}
+        </div>
+        {config.blockedSites.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {config.blockedSites.map((s) => (
+              <span key={s} className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive">
+                {s}
+                <button
+                  onClick={() => update({ blockedSites: config.blockedSites.filter((x) => x !== s) })}
+                  className="opacity-60 hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex gap-2">
+          <Input
+            placeholder="example.com"
+            value={customSite}
+            onChange={(e) => setCustomSite(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { addSite(customSite); setCustomSite(''); }
+            }}
+          />
+          <Button size="icon" onClick={() => { addSite(customSite); setCustomSite(''); }}>
+            <Plus className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+
+      {/* Blocked keywords */}
+      <div>
+        <Label className="flex items-center gap-1.5 text-xs">
+          <Search className="h-3.5 w-3.5" /> Blocked keywords
+        </Label>
+        {config.blockedKeywords.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {config.blockedKeywords.map((k) => (
+              <span key={k} className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+                {k}
+                <button
+                  onClick={() => update({ blockedKeywords: config.blockedKeywords.filter((x) => x !== k) })}
+                  className="opacity-60 hover:opacity-100"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+        <div className="mt-3 flex gap-2">
+          <Input
+            placeholder="Keyword to block in browser"
+            value={customKeyword}
+            onChange={(e) => setCustomKeyword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addKeyword()}
+          />
+          <Button size="icon" onClick={addKeyword}><Plus className="h-4 w-4" /></Button>
+        </div>
+      </div>
+
+      <div className="flex items-start gap-2 rounded-lg bg-muted/40 p-3">
+        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <p className="text-[11px] text-muted-foreground">
+          Phone, Dialer and Clock can never be blocked — emergency calls and your alarm always stay reachable.
+        </p>
+      </div>
+
+      <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+        <Ban className="h-3.5 w-3.5" />
+        Blocking applies only inside the Sleep and Rise windows.
+      </div>
+    </div>
+  );
+}
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/NightToRisePermissions.tsx===
+/**
+ * NightToRisePermissions — real permission status + request row for Sleep to Rise.
+ *
+ * Native enforcement (ShieldAccessibilityService + NightToRiseManager) needs
+ * Usage Access, Accessibility and Overlay. Without them the lock silently does
+ * nothing, so we surface the exact missing pieces with working request buttons.
+ */
+import { useCallback, useEffect, useState } from 'react';
+import { AlertTriangle, Check, Loader2, ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { isNative, isAndroid } from '@/lib/capacitor/platform';
+import Shield from '@/lib/capacitor/shieldPlugin';
+import { lightImpact } from '@/lib/capacitor/nativeHaptics';
+
+type Key = 'usageStats' | 'accessibility' | 'overlay' | 'battery';
+
+const ROWS: Array<{ key: Key; label: string; why: string; request: () => Promise<void> }> = [
+  {
+    key: 'usageStats',
+    label: 'Usage access',
+    why: 'Detects which app is open during a lock window',
+    request: () => Shield.requestUsageStats(),
+  },
+  {
+    key: 'accessibility',
+    label: 'Accessibility',
+    why: 'Closes blocked apps and blocks distracting sites',
+    request: () => Shield.requestAccessibility(),
+  },
+  {
+    key: 'overlay',
+    label: 'Display over other apps',
+    why: 'Shows the block screen on top of blocked apps',
+    request: () => Shield.requestOverlay(),
+  },
+  {
+    key: 'battery',
+    label: 'Run in background',
+    why: 'Keeps the lock alive while you sleep',
+    request: () => Shield.requestBattery(),
+  },
+];
+
+export function NightToRisePermissions() {
+  const [state, setState] = useState<Record<Key, boolean> | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const refresh = useCallback(async () => {
+    if (!isNative || !isAndroid) { setLoading(false); return; }
+    try {
+      const p = await Shield.checkPermissions();
+      setState({
+        usageStats: !!p?.usageStats,
+        accessibility: !!p?.accessibility,
+        overlay: !!p?.overlay,
+        battery: !!p?.battery,
+      });
+    } catch (e) {
+      console.warn('[NightToRise] checkPermissions failed', e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+    const onVisible = () => { if (document.visibilityState === 'visible') void refresh(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [refresh]);
+
+  if (!isNative || !isAndroid) {
+    return (
+      <div className="flex items-start gap-2 rounded-xl bg-muted/40 p-3">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+        <p className="text-[11px] text-muted-foreground">
+          App blocking runs only inside the Android app. On the web you can configure everything, but
+          nothing is enforced.
+        </p>
+      </div>
+    );
+  }
+
+  if (loading || !state) {
+    return (
+      <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking permissions…
+      </div>
+    );
+  }
+
+  const missing = ROWS.filter((r) => !state[r.key]);
+
+  return (
+    <div className="space-y-2">
+      {missing.length === 0 ? (
+        <div className="flex items-center gap-2 rounded-xl border border-primary/40 bg-primary/10 p-3">
+          <ShieldCheck className="h-4 w-4 text-primary" />
+          <p className="text-xs font-medium text-primary">All permissions granted — blocking is live.</p>
+        </div>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">
+          {missing.length} permission{missing.length > 1 ? 's' : ''} missing — blocking will not work
+          until these are granted.
+        </p>
+      )}
+
+      {ROWS.map((row) => {
+        const ok = state[row.key];
+        return (
+          <div
+            key={row.key}
+            className={cn(
+              'flex items-center justify-between gap-3 rounded-xl border px-3 py-2.5',
+              ok ? 'border-border bg-muted/30' : 'border-destructive/40 bg-destructive/5',
+            )}
+          >
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold">{row.label}</p>
+              <p className="truncate text-[11px] text-muted-foreground">{row.why}</p>
+            </div>
+            {ok ? (
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                <Check className="h-4 w-4 text-primary" />
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={async () => {
+                  void lightImpact();
+                  try { await row.request(); } catch { toast.error('Could not open settings'); }
+                }}
+                className="shrink-0 rounded-full bg-primary px-3 py-1.5 text-[11px] font-bold text-primary-foreground active:scale-95 transition-transform"
+              >
+                Grant
+              </button>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export default NightToRisePermissions;
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/InstalledAppPicker.tsx===
+/**
+ * InstalledAppPicker — real device app-list picker.
+ *
+ * On Android it reads the actually installed launchable apps through the
+ * ShieldPlugin (`getInstalledApps`) so selections are saved as real package
+ * names, which is what the native NightToRise enforcement matches against.
+ * On web (and if the native call fails) it falls back to a curated list so the
+ * UI stays usable for testing.
+ */
+import { useEffect, useMemo, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Search, X, Check, Loader2, Smartphone } from 'lucide-react';
+import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
+import { isNative, isAndroid } from '@/lib/capacitor/platform';
+import Shield from '@/lib/capacitor/shieldPlugin';
+import { lightImpact, successNotification } from '@/lib/capacitor/nativeHaptics';
+import { AllowedApp, SUGGESTED_BLOCK_APPS, ALWAYS_ALLOWED_IDS } from './types';
+
+const FALLBACK_APPS: AllowedApp[] = [
+  { id: 'com.android.phone', name: 'Phone' },
+  { id: 'com.android.dialer', name: 'Dialer' },
+  { id: 'com.android.deskclock', name: 'Clock' },
+  { id: 'com.android.camera', name: 'Camera' },
+  { id: 'com.google.android.calendar', name: 'Calendar' },
+  { id: 'com.google.android.keep', name: 'Keep Notes' },
+  { id: 'com.whatsapp', name: 'WhatsApp' },
+  { id: 'org.telegram.messenger', name: 'Telegram' },
+  { id: 'com.spotify.music', name: 'Spotify' },
+  { id: 'com.google.android.gm', name: 'Gmail' },
+  ...SUGGESTED_BLOCK_APPS,
+];
+
+interface Props {
+  open: boolean;
+  title: string;
+  /** Currently selected package names. */
+  selected: string[];
+  /** Package names that may never be deselected (safety). */
+  lockedIds?: string[];
+  onClose: () => void;
+  onSave: (apps: AllowedApp[]) => void;
+}
+
+export function InstalledAppPicker({
+  open,
+  title,
+  selected,
+  lockedIds = [],
+  onClose,
+  onSave,
+}: Props) {
+  const [apps, setApps] = useState<AllowedApp[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [query, setQuery] = useState('');
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [nativeUnavailable, setNativeUnavailable] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    setPicked(new Set([...selected, ...lockedIds]));
+    setQuery('');
+
+    let cancelled = false;
+    const loadApps = async () => {
+      setLoading(true);
+      setNativeUnavailable(false);
+      try {
+        if (isNative && isAndroid) {
+          const res = await Shield.getInstalledApps();
+          const list = (res?.apps ?? [])
+            .filter((a) => a?.packageName)
+            .map((a) => ({ id: a.packageName, name: a.appName || a.packageName }));
+          if (!cancelled && list.length > 0) {
+            setApps(dedupe(list));
+            return;
+          }
+        }
+        if (!cancelled) {
+          setNativeUnavailable(isNative);
+          setApps(dedupe(FALLBACK_APPS));
+        }
+      } catch (e) {
+        console.warn('[InstalledAppPicker] getInstalledApps failed', e);
+        if (!cancelled) {
+          setNativeUnavailable(true);
+          setApps(dedupe(FALLBACK_APPS));
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    void loadApps();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  // Ensure already-selected apps are visible even if not returned by the OS.
+  const merged = useMemo(() => {
+    const known = new Set(apps.map((a) => a.id));
+    const extras = selected
+      .filter((id) => !known.has(id))
+      .map((id) => ({ id, name: id }));
+    return [...extras, ...apps];
+  }, [apps, selected]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = q
+      ? merged.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
+      : merged;
+    return [...list].sort((a, b) => {
+      const as = picked.has(a.id) ? 0 : 1;
+      const bs = picked.has(b.id) ? 0 : 1;
+      if (as !== bs) return as - bs;
+      return a.name.localeCompare(b.name);
+    });
+  }, [merged, query, picked]);
+
+  const toggle = (id: string) => {
+    if (lockedIds.includes(id)) {
+      toast.info('This app is always allowed for safety');
+      return;
+    }
+    void lightImpact();
+    setPicked((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleSave = () => {
+    void successNotification();
+    const byId = new Map(merged.map((a) => [a.id, a]));
+    const result: AllowedApp[] = Array.from(picked).map(
+      (id) => byId.get(id) ?? { id, name: id },
+    );
+    onSave(result);
+    onClose();
+  };
+
+  if (!open) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[99999] flex flex-col bg-background text-foreground">
+      {/* Header — single close button */}
+      <div className="flex items-center gap-3 border-b border-border px-3 py-3 pt-[max(env(safe-area-inset-top),0.75rem)]">
+        <button
+          type="button"
+          onClick={() => { void lightImpact(); onClose(); }}
+          aria-label="Close"
+          className="flex h-10 w-10 items-center justify-center rounded-full bg-muted active:scale-95 transition-transform"
+        >
+          <X className="h-5 w-5" />
+        </button>
+        <div className="min-w-0 flex-1">
+          <h2 className="truncate text-base font-bold">{title}</h2>
+          <p className="text-xs text-muted-foreground">{picked.size} selected</p>
+        </div>
+      </div>
+
+      {/* Search */}
+      <div className="px-3 py-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search apps..."
+            className="h-11 w-full rounded-xl border border-border bg-muted/40 pl-9 pr-3 text-sm outline-none focus:border-primary"
+          />
+        </div>
+        {nativeUnavailable && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            Could not read the installed app list (permission or OS restriction). Showing common apps —
+            search still matches package names.
+          </p>
+        )}
+      </div>
+
+      {/* List */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-24">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
+            <Loader2 className="h-6 w-6 animate-spin" />
+            <p className="text-sm">Reading installed apps…</p>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-16 text-muted-foreground">
+            <Smartphone className="h-8 w-8 opacity-40" />
+            <p className="text-sm">No apps match “{query}”</p>
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {filtered.map((app) => {
+              const on = picked.has(app.id);
+              const locked = lockedIds.includes(app.id);
+              return (
+                <li key={app.id}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(app.id)}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition-colors active:scale-[0.99]',
+                      on ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50',
+                    )}
+                  >
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
+                      <Smartphone className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">{app.name}</p>
+                      <p className="truncate text-[11px] text-muted-foreground">{app.id}</p>
+                    </div>
+                    {locked && <span className="text-[10px] text-muted-foreground">always</span>}
+                    <div
+                      className={cn(
+                        'flex h-6 w-6 shrink-0 items-center justify-center rounded-full border',
+                        on ? 'border-primary bg-primary text-primary-foreground' : 'border-border',
+                      )}
+                    >
+                      {on && <Check className="h-3.5 w-3.5" />}
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+
+      {/* Save */}
+      <div className="border-t border-border bg-background px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
+        <button
+          type="button"
+          onClick={handleSave}
+          className="h-14 w-full rounded-2xl bg-primary text-base font-bold text-primary-foreground active:scale-[0.98] transition-transform"
+        >
+          Save {picked.size > 0 ? `(${picked.size})` : ''}
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+function dedupe(list: AllowedApp[]): AllowedApp[] {
+  const seen = new Set<string>();
+  const out: AllowedApp[] = [];
+  for (const a of list) {
+    if (seen.has(a.id)) continue;
+    seen.add(a.id);
+    out.push(a);
+  }
+  return out;
+}
+
+export { ALWAYS_ALLOWED_IDS };
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/types.ts===
+export type ScheduleMode = 'everyday' | 'weekdays' | 'custom';
+
+export interface AllowedApp {
+  id: string;
+  name: string;
+  icon?: string;
+}
+
+export interface NightToRiseConfig {
+  enabled: boolean;
+  sleepTime: string; // "HH:MM" 24h
+  sleepLockMinutesBefore: number;
+  riseLockMinutesAfter: number;
+  allowedApps: AllowedApp[];
+  /** PHASE 2 — distraction apps blocked during sleep/rise windows. */
+  blockedApps: AllowedApp[];
+  /** PHASE 2 — distracting sites blocked in the browser during lock windows. */
+  blockedSites: string[];
+  /** PHASE 2 — block any URL/search containing these keywords. */
+  blockedKeywords: string[];
+  /**
+   * PHASE 2 — enforcement strategy:
+   *  - 'blocklist': only the blocked apps/sites are locked
+   *  - 'allowlist': everything is locked except the allowed apps (stricter)
+   */
+  blocklistMode: 'blocklist' | 'allowlist';
+  sleepBlockMessage: string;
+  riseBlockMessage: string;
+  scheduleMode: ScheduleMode;
+  scheduleDays: number[]; // 0=Sun..6=Sat
+  strictMode: boolean;
+  showStreakOnBlock: boolean;
+  pausedUntil?: string | null; // ISO date
+  configured: boolean;
+  /** PHASE 3 — share nightly result with the user's Rise group feed. */
+  shareWithGroup: boolean;
+  /**
+   * NEW: dates ("YYYY-MM-DD") "Pause for one night" was used, kept for the
+   * last ~14 entries. Used to enforce a 1-pause-per-week limit so the
+   * feature can't be used to silently disable protection every night.
+   */
+  pauseHistory: string[];
+}
+
+/** PHASE 2 — popular distraction apps suggested by default. */
+export const SUGGESTED_BLOCK_APPS: AllowedApp[] = [
+  { id: 'com.facebook.katana', name: 'Facebook' },
+  { id: 'com.instagram.android', name: 'Instagram' },
+  { id: 'com.zhiliaoapp.musically', name: 'TikTok' },
+  { id: 'com.google.android.youtube', name: 'YouTube' },
+  { id: 'com.snapchat.android', name: 'Snapchat' },
+  { id: 'com.twitter.android', name: 'X (Twitter)' },
+  { id: 'com.tencent.ig', name: 'PUBG Mobile' },
+  { id: 'com.dts.freefireth', name: 'Free Fire' },
+  { id: 'com.netflix.mediaclient', name: 'Netflix' },
+  { id: 'com.reddit.frontpage', name: 'Reddit' },
+];
+
+/** PHASE 2 — commonly blocked distracting sites. */
+export const SUGGESTED_BLOCK_SITES = [
+  'facebook.com',
+  'instagram.com',
+  'tiktok.com',
+  'youtube.com',
+  'x.com',
+  'reddit.com',
+];
+
+export const DEFAULT_CONFIG: NightToRiseConfig = {
+  enabled: false,
+  sleepTime: '22:30',
+  sleepLockMinutesBefore: 30,
+  riseLockMinutesAfter: 30,
+  allowedApps: [
+    { id: 'com.android.dialer', name: 'Phone' },
+    { id: 'com.android.deskclock', name: 'Clock' },
+    { id: 'com.google.android.deskclock', name: 'Clock (Google)' },
+  ],
+
+  blockedApps: SUGGESTED_BLOCK_APPS.slice(0, 4),
+  blockedSites: [],
+  blockedKeywords: [],
+  blocklistMode: 'blocklist',
+  sleepBlockMessage: 'Time to rest. Put the phone down. 🌙',
+  riseBlockMessage: 'Start your morning right. No scrolling yet. 🌅',
+  scheduleMode: 'everyday',
+  scheduleDays: [0, 1, 2, 3, 4, 5, 6],
+  strictMode: false,
+  showStreakOnBlock: true,
+  pausedUntil: null,
+  configured: false,
+  shareWithGroup: false,
+  pauseHistory: [],
+};
+
+/**
+ * Apps that can never be blocked, for user safety. Enforced in the UI so a
+ * user can't lock themselves out of calls or the alarm clock.
+ */
+export const ALWAYS_ALLOWED_IDS = [
+  'com.android.phone',
+  'com.android.dialer',
+  'com.google.android.dialer',
+  'com.android.server.telecom',
+  'com.android.emergency',
+  'com.android.deskclock',
+  'com.google.android.deskclock',
+];
+
+
+export const STORAGE_KEY = 'night_to_rise_config_v1';
+
+/** ISO week key (e.g. "2026-W32") — used for the weekly pause limit. */
+export function getIsoWeekKey(d: Date): string {
+  const date = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const dayNum = date.getUTCDay() || 7;
+  date.setUTCDate(date.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(date.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((date.getTime() - yearStart.getTime()) / 86400000) + 1) / 7);
+  return `${date.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
+
+/** Max "Pause for one night" uses allowed within a single ISO week. */
+export const MAX_PAUSES_PER_WEEK = 1;
+
+/** PHASE 2 — strict mode: emergency unlock only becomes available after this
+ *  cool-down (10 minutes), instead of being hidden entirely. */
+export const STRICT_UNLOCK_DELAY_MS = 10 * 60 * 1000;
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/useNightToRise.ts===
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DEFAULT_CONFIG, NightToRiseConfig, STORAGE_KEY, getIsoWeekKey, MAX_PAUSES_PER_WEEK } from './types';
+import { nightToRiseBridge } from '@/lib/capacitor/nightToRiseBridge';
+
+
+function load(): NightToRiseConfig {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return DEFAULT_CONFIG;
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_CONFIG;
+  }
+}
+
+function parseHM(s: string): { h: number; m: number } {
+  const [h, m] = s.split(':').map(Number);
+  return { h: h || 0, m: m || 0 };
+}
+
+function minutesNow(d = new Date()) {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/** Next epoch-ms occurrence of a "HH:MM" time (today if still ahead, else tomorrow). */
+function nextOccurrenceMs(timeStr: string): number {
+  const { h, m } = parseHM(timeStr);
+  const next = new Date();
+  next.setHours(h, m, 0, 0);
+  if (next <= new Date()) next.setDate(next.getDate() + 1);
+  return next.getTime();
+}
+
+export function useNightToRise(riseAlarmTime?: string | null) {
+  const [config, setConfig] = useState<NightToRiseConfig>(load);
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
+  const update = useCallback((patch: Partial<NightToRiseConfig>) => {
+    setConfig((prev) => {
+      const next = { ...prev, ...patch, configured: true };
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(next)); } catch {}
+      // Push to Android native side (no-op on web/iOS).
+      void nightToRiseBridge.setConfig(next);
+      return next;
+    });
+  }, []);
+
+  // Push current config to native once on mount (after restart).
+  useEffect(() => { void nightToRiseBridge.setConfig(config); /* eslint-disable-next-line */ }, []);
+
+  // FIX (v2): the native side previously never learned the rise-alarm time,
+  // so Rise Guard could never trigger while the app wasn't in the foreground.
+  // Push it to native whenever it changes (and re-push periodically so the
+  // "next occurrence" stays fresh across day boundaries).
+  useEffect(() => {
+    if (!riseAlarmTime) {
+      void nightToRiseBridge.setRiseAlarm(0);
+      return;
+    }
+    void nightToRiseBridge.setRiseAlarm(nextOccurrenceMs(riseAlarmTime));
+  }, [riseAlarmTime, now]);
+
+  const status = useMemo(() => {
+    if (!config.enabled || !config.configured) {
+      return { phase: 'off' as const, label: null as string | null, endsAt: null as Date | null };
+    }
+    if (config.pausedUntil && new Date(config.pausedUntil) > now) {
+      return { phase: 'paused' as const, label: 'Paused tonight', endsAt: new Date(config.pausedUntil) };
+    }
+    const day = now.getDay();
+    const active = config.scheduleMode === 'everyday'
+      ? true
+      : config.scheduleMode === 'weekdays'
+        ? day >= 1 && day <= 5
+        : config.scheduleDays.includes(day);
+
+    if (!active) return { phase: 'inactive-day' as const, label: 'Not scheduled today', endsAt: null };
+
+    const cur = minutesNow(now);
+    const sleep = parseHM(config.sleepTime);
+    const sleepStart = (sleep.h * 60 + sleep.m - config.sleepLockMinutesBefore + 24 * 60) % (24 * 60);
+    // FIX (v2): sleep window no longer force-closes 30 min after target time.
+    // It stays open until the rise alarm (if any); the web overlay mirrors the
+    // native manager's "continuous lock" behavior. Fallback grace kept modest
+    // here since this path is only used for the in-app overlay preview.
+    const sleepEnd = riseAlarmTime ? parseHM(riseAlarmTime).h * 60 + parseHM(riseAlarmTime).m : (sleep.h * 60 + sleep.m + 570) % (24 * 60);
+    const sleepActive = sleepStart <= sleepEnd
+      ? cur >= sleepStart && cur < sleepEnd
+      : cur >= sleepStart || cur < sleepEnd;
+    if (sleepActive) {
+      return { phase: 'sleep-lock' as const, label: 'Sleep lock active', endsAt: null };
+    }
+
+    if (riseAlarmTime) {
+      const a = parseHM(riseAlarmTime);
+      const riseStart = a.h * 60 + a.m;
+      const riseEnd = (riseStart + config.riseLockMinutesAfter) % (24 * 60);
+      const riseActive = riseStart <= riseEnd
+        ? cur >= riseStart && cur < riseEnd
+        : cur >= riseStart || cur < riseEnd;
+      if (riseActive) return { phase: 'rise-lock' as const, label: 'Rise lock active', endsAt: null };
+    }
+
+    return { phase: 'armed' as const, label: 'Armed', endsAt: null };
+  }, [config, now, riseAlarmTime]);
+
+  // NEW: weekly pause-limit check
+  const canPauseTonight = useMemo(() => {
+    const weekKey = getIsoWeekKey(new Date());
+    const usesThisWeek = config.pauseHistory.filter((d) => getIsoWeekKey(new Date(d)) === weekKey).length;
+    return usesThisWeek < MAX_PAUSES_PER_WEEK;
+  }, [config.pauseHistory]);
+
+  const pauseTonight = useCallback(() => {
+    if (!canPauseTonight) return false;
+    const next = new Date();
+    next.setHours(12, 0, 0, 0);
+    if (next < new Date()) next.setDate(next.getDate() + 1);
+    const todayIso = new Date().toISOString().slice(0, 10);
+    update({
+      pausedUntil: next.toISOString(),
+      pauseHistory: [...config.pauseHistory.slice(-13), todayIso],
+    });
+    return true;
+  }, [update, canPauseTonight, config.pauseHistory]);
+
+  return { config, update, status, pauseTonight, canPauseTonight };
+}
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/useNightToRiseStreak.ts===
+/**
+ * useNightToRiseStreak — tracks consecutive nights the user did NOT break the
+ * Night to Rise lock. Stored entirely in localStorage as approved in the plan.
+ *
+ * Storage key: `night_to_rise_sessions_v1` → Array<{ date: 'YYYY-MM-DD'; broken: boolean }>
+ * Call `recordBreak()` whenever the user uses the emergency unlock or opens a
+ * disallowed app from within the guard. Call `recordCleanNight()` once per day
+ * when the rise-lock window ends without a break.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+
+export interface SessionRow {
+  date: string;       // YYYY-MM-DD
+  broken: boolean;
+}
+
+const KEY = 'night_to_rise_sessions_v1';
+
+function read(): SessionRow[] {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return [];
+    return JSON.parse(raw) as SessionRow[];
+  } catch { return []; }
+}
+
+function write(rows: SessionRow[]) {
+  try { localStorage.setItem(KEY, JSON.stringify(rows.slice(-90))); } catch {}
+}
+
+function todayKey() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function calcStreak(rows: SessionRow[]): number {
+  if (rows.length === 0) return 0;
+  const map = new Map(rows.map((r) => [r.date, r.broken]));
+  let streak = 0;
+  const d = new Date();
+  // walk backwards starting yesterday
+  d.setDate(d.getDate() - 1);
+  for (let i = 0; i < 90; i++) {
+    const key = d.toISOString().slice(0, 10);
+    if (!map.has(key)) break;
+    if (map.get(key) === true) break;
+    streak++;
+    d.setDate(d.getDate() - 1);
+  }
+  return streak;
+}
+
+/** PHASE 3 — longest clean run anywhere in the stored history. */
+function calcLongest(rows: SessionRow[]): number {
+  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  let best = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const r of sorted) {
+    if (r.broken) { run = 0; prev = r.date; continue; }
+    if (prev) {
+      const gap = (new Date(r.date).getTime() - new Date(prev).getTime()) / 86400000;
+      run = gap === 1 ? run + 1 : 1;
+    } else {
+      run = 1;
+    }
+    prev = r.date;
+    best = Math.max(best, run);
+  }
+  return best;
+}
+
+/** PHASE 3 — last `days` days, oldest → newest, for the recap strip. */
+function buildRecent(rows: SessionRow[], days: number) {
+  const map = new Map(rows.map((r) => [r.date, r.broken]));
+  const out: { date: string; state: 'clean' | 'broken' | 'none' }[] = [];
+  const d = new Date();
+  d.setDate(d.getDate() - (days - 1));
+  for (let i = 0; i < days; i++) {
+    const key = d.toISOString().slice(0, 10);
+    out.push({ date: key, state: map.has(key) ? (map.get(key) ? 'broken' : 'clean') : 'none' });
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+}
+
+export function useNightToRiseStreak() {
+  const [rows, setRows] = useState<SessionRow[]>(read);
+
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === KEY) setRows(read());
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
+
+  const recordBreak = useCallback(() => {
+    setRows((prev) => {
+      const t = todayKey();
+      const next = [...prev.filter((r) => r.date !== t), { date: t, broken: true }];
+      write(next);
+      return next;
+    });
+  }, []);
+
+  const recordCleanNight = useCallback(() => {
+    setRows((prev) => {
+      const t = todayKey();
+      if (prev.find((r) => r.date === t)) return prev;
+      const next = [...prev, { date: t, broken: false }];
+      write(next);
+      return next;
+    });
+  }, []);
+
+  const last7 = buildRecent(rows, 7);
+  const last30 = buildRecent(rows, 30);
+
+  return {
+    rows,
+    streak: calcStreak(rows),
+    longestStreak: calcLongest(rows),
+    protectedNights: rows.filter((r) => !r.broken).length,
+    brokenNights: rows.filter((r) => r.broken).length,
+    last7,
+    last30,
+    weekProtected: last7.filter((d) => d.state === 'clean').length,
+    weekBroken: last7.filter((d) => d.state === 'broken').length,
+    recordBreak,
+    recordCleanNight,
+  };
+}
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/timeMath.ts===
+/**
+ * timeMath — the SINGLE source of truth for every Sleep-to-Rise time
+ * calculation (Section 0.2).
+ *
+ * Everything here works in *local* minutes-of-day (0..1439) and treats the
+ * clock as a circle, so windows that cross midnight (e.g. sleep 23:30 → rise
+ * 06:00) never produce negative or wrapped-around durations.
+ *
+ * Rules used everywhere:
+ *   - `parseHM("23:30")`            → 1410
+ *   - `forwardDelta(from, to)`      → minutes going *forward* from `from` to
+ *                                     `to`, always in [0, 1439]. This is what
+ *                                     makes midnight rollover correct: at
+ *                                     00:30 the delta to 23:30 is 1380, and the
+ *                                     delta from 23:30 to 00:30 is 60.
+ *   - a window [start, end) is active when
+ *     `forwardDelta(start, now) < forwardDelta(start, end)`.
+ *
+ * All four displays required by the spec are derived from these two helpers:
+ *   (a) time until Sleep Guard activates   → untilSleepGuard
+ *   (b) time left once Sleep Guard active  → sleepGuardRemaining
+ *   (c) time until the Rise alarm          → untilRiseAlarm
+ *   (d) time left in the post-wake lock    → riseGuardRemaining
+ */
+
+export const MINUTES_PER_DAY = 1440;
+
+/** "HH:MM" (24h) → minutes of day. Invalid input degrades to 0. */
+export function parseHM(value: string | null | undefined): number {
+  if (!value) return 0;
+  const [h, m] = value.split(':').map((n) => Number(n));
+  const hh = Number.isFinite(h) ? h : 0;
+  const mm = Number.isFinite(m) ? m : 0;
+  return (((hh * 60 + mm) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+}
+
+/** Local minutes-of-day for a Date (defaults to now). */
+export function minutesOfDay(d: Date = new Date()): number {
+  return d.getHours() * 60 + d.getMinutes();
+}
+
+/** Normalise any minute value onto [0, 1439]. */
+export function norm(min: number): number {
+  return ((Math.round(min) % MINUTES_PER_DAY) + MINUTES_PER_DAY) % MINUTES_PER_DAY;
+}
+
+/** Minutes going forward around the clock from `from` to `to`. Always >= 0. */
+export function forwardDelta(from: number, to: number): number {
+  return norm(to - from);
+}
+
+/** Is `now` inside the half-open circular window [start, end)? */
+export function inWindow(now: number, start: number, end: number): boolean {
+  const span = forwardDelta(start, end);
+  if (span === 0) return false;
+  return forwardDelta(start, now) < span;
+}
+
+/** Length of the circular window [start, end); a full day when start === end. */
+export function windowSpan(start: number, end: number): number {
+  const span = forwardDelta(start, end);
+  return span === 0 ? MINUTES_PER_DAY : span;
+}
+
+/** Progress through a circular window, clamped to [0, 1]. */
+export function windowProgress(now: number, start: number, end: number): number {
+  const span = windowSpan(start, end);
+  return Math.min(1, Math.max(0, forwardDelta(start, now) / span));
+}
+
+/** "2h 10m" / "18m" / "now". */
+export function formatGap(minutes: number): string {
+  const m = Math.max(0, Math.round(minutes));
+  if (m === 0) return 'now';
+  const h = Math.floor(m / 60);
+  const rest = m % 60;
+  if (h === 0) return `${rest}m`;
+  if (rest === 0) return `${h}h`;
+  return `${h}h ${rest}m`;
+}
+
+/** 12-hour clock label for a minutes-of-day value. */
+export function formatClock(minutesOfDayValue: number): string {
+  const v = norm(minutesOfDayValue);
+  const h = Math.floor(v / 60);
+  const m = v % 60;
+  const suffix = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${String(m).padStart(2, '0')} ${suffix}`;
+}
+
+export interface NightWindowInput {
+  /** "HH:MM" target sleep time. */
+  sleepTime: string;
+  /** "HH:MM" rise alarm, or null when no alarm is set. */
+  riseTime: string | null;
+  /** Minutes the sleep lock starts *before* the target sleep time. */
+  lockBeforeMin: number;
+  /** Minutes the rise lock stays on *after* the alarm. */
+  lockAfterMin: number;
+  /** Current time (defaults to now). */
+  now?: Date;
+  /** User can run Sleep Guard, Rise Guard, or both. Default: both on. */
+  sleepGuardEnabled?: boolean;
+  riseGuardEnabled?: boolean;
+  /** 'until-alarm' (default) or 'duration' — Sleep Guard auto-off. */
+  sleepEndMode?: 'until-alarm' | 'duration';
+  /** Minutes Sleep Guard runs in 'duration' mode. */
+  sleepDurationMin?: number;
+  /** Weekdays (0=Sun) the alarm rings on. Empty = every day. */
+  riseDays?: number[];
+  /**
+   * Hard ceiling (minutes) on Sleep Guard when no alarm is attached. Measured
+   * from the LOCK START, exactly like native enforcement, so the on-screen
+   * countdown and the phone's behaviour can never drift apart.
+   */
+  safetyCapMinutes?: number;
+}
+
+
+export interface NightWindows {
+  nowMin: number;
+  /** Sleep Guard window. */
+  sleepStart: number;
+  sleepEnd: number;
+  sleepActive: boolean;
+  /** Rise Guard (post-alarm) window. Null when no alarm is set. */
+  riseStart: number | null;
+  riseEnd: number | null;
+  riseActive: boolean;
+  /** (a) minutes until Sleep Guard turns on; 0 while it is already on. */
+  untilSleepGuard: number;
+  /** (b) minutes left of the active Sleep Guard window; 0 when inactive. */
+  sleepGuardRemaining: number;
+  /** (c) minutes until the Rise alarm fires; null when no alarm. */
+  untilRiseAlarm: number | null;
+  /** (d) minutes left of the active Rise Guard lock; 0 when inactive. */
+  riseGuardRemaining: number;
+  /** Whole protected span (sleep lock start → rise lock end) and progress. */
+  nightStart: number;
+  nightEnd: number;
+  nightProgress: number;
+  inNight: boolean;
+}
+
+/**
+ * Computes every Sleep-to-Rise time value from one consistent model.
+ * With no rise alarm, Sleep Guard ends at the safety cap measured from the
+ * LOCK START — the same rule native enforcement applies.
+ */
+export function computeNightWindows({
+  sleepTime,
+  riseTime,
+  lockBeforeMin,
+  lockAfterMin,
+  now = new Date(),
+  sleepGuardEnabled = true,
+  riseGuardEnabled = true,
+  sleepEndMode = 'until-alarm',
+  sleepDurationMin = 180,
+  riseDays = [],
+  safetyCapMinutes = 600,
+}: NightWindowInput): NightWindows {
+  const nowMin = minutesOfDay(now);
+  const sleepTarget = parseHM(sleepTime);
+  const sleepStart = norm(sleepTarget - lockBeforeMin);
+
+  const alarm = riseTime ? parseHM(riseTime) : null;
+  // Sleep Guard runs from the wind-down start until the alarm (or the safety
+  // cap, counted from the lock start, when there is no alarm) — unless the
+  // user asked it to switch itself off after a fixed duration, in which case
+  // it ends at whichever comes first: that duration, or the alarm.
+  const cap = Math.max(60, Math.round(safetyCapMinutes));
+  const untilAlarmEnd = alarm !== null ? alarm : norm(sleepStart + cap);
+  let sleepEnd = untilAlarmEnd;
+  if (sleepEndMode === 'duration') {
+    const duration = Math.max(15, Math.round(sleepDurationMin));
+    const alarmSpan = alarm !== null ? windowSpan(sleepStart, alarm) : cap;
+    sleepEnd = duration < alarmSpan ? norm(sleepStart + duration) : untilAlarmEnd;
+  }
+
+  const riseStart = alarm;
+  const riseEnd = alarm !== null ? norm(alarm + lockAfterMin) : null;
+
+  const sleepActive = sleepGuardEnabled && inWindow(nowMin, sleepStart, sleepEnd);
+  // Rise Guard only exists on mornings the alarm actually rings.
+  const alarmRingsToday = riseDays.length === 0 || riseDays.includes(now.getDay());
+  const riseActive =
+    riseGuardEnabled && alarmRingsToday && riseStart !== null && riseEnd !== null && lockAfterMin > 0
+      ? inWindow(nowMin, riseStart, riseEnd)
+      : false;
+
+
+  const nightStart = sleepStart;
+  const nightEnd = riseEnd ?? sleepEnd;
+
+  return {
+    nowMin,
+    sleepStart,
+    sleepEnd,
+    sleepActive,
+    riseStart,
+    riseEnd,
+    riseActive,
+    untilSleepGuard: sleepActive ? 0 : forwardDelta(nowMin, sleepStart),
+    sleepGuardRemaining: sleepActive ? forwardDelta(nowMin, sleepEnd) : 0,
+    untilRiseAlarm: riseStart === null ? null : forwardDelta(nowMin, riseStart),
+    riseGuardRemaining: riseActive && riseEnd !== null ? forwardDelta(nowMin, riseEnd) : 0,
+    nightStart,
+    nightEnd,
+    nightProgress: windowProgress(nowMin, nightStart, nightEnd),
+    inNight: inWindow(nowMin, nightStart, nightEnd),
+  };
+}
+
+/**
+ * Human status line shared by the Night Arc and every other "time remaining"
+ * display, so they can never disagree.
+ */
+export function describeStatus(
+  w: NightWindows,
+  phase: string,
+): { primary: string; secondary: string } {
+  if (phase === 'off') return { primary: 'Protection off', secondary: 'Turn it on to begin' };
+  if (phase === 'paused') return { primary: 'Paused tonight', secondary: 'Protection resumes tomorrow' };
+  if (phase === 'inactive-day') return { primary: 'Not scheduled tonight', secondary: 'No lock will run' };
+  if (phase === 'rise-lock') {
+    return {
+      primary: `Rise Guard active — ${formatGap(w.riseGuardRemaining)} left`,
+      secondary: 'Screens stay closed a little longer',
+    };
+  }
+  if (phase === 'sleep-lock') {
+    return {
+      primary: `Sleep Guard active — ${formatGap(w.sleepGuardRemaining)} left`,
+      secondary: 'Rest now, the phone can wait',
+    };
+  }
+  return {
+    primary: `Sleep Guard in ${formatGap(w.untilSleepGuard)}`,
+    secondary: `Wind-down starts at ${formatClock(w.sleepStart)}`,
+  };
+}
+
+/** Next epoch-ms occurrence of a "HH:MM" local time (today if ahead, else tomorrow). */
+export function nextOccurrenceMs(timeStr: string, from: Date = new Date()): number {
+  const target = parseHM(timeStr);
+  const d = new Date(from);
+  d.setHours(Math.floor(target / 60), target % 60, 0, 0);
+  if (d.getTime() <= from.getTime()) d.setDate(d.getDate() + 1);
+  return d.getTime();
+}
+
+/**
+ * Alarm occurrence that belongs to the currently relevant Sleep-to-Rise
+ * window. During the post-alarm Rise Guard this deliberately returns today's
+ * already-fired alarm instead of jumping to tomorrow. Native enforcement needs
+ * that timestamp to keep Rise Guard active until its configured end.
+ */
+export function relevantAlarmOccurrenceMs(
+  timeStr: string,
+  riseLockMinutesAfter: number,
+  from: Date = new Date(),
+): number {
+  const target = parseHM(timeStr);
+  const occurrence = new Date(from);
+  occurrence.setHours(Math.floor(target / 60), target % 60, 0, 0);
+
+  const elapsed = from.getTime() - occurrence.getTime();
+  const riseWindowMs = Math.max(0, riseLockMinutesAfter) * 60_000;
+  if (elapsed <= 0 || elapsed < riseWindowMs) return occurrence.getTime();
+
+  occurrence.setDate(occurrence.getDate() + 1);
+  return occurrence.getTime();
+}
+
+===ENDFILE===
+===FILE:src/components/rise/night-to-rise/nextRiseAlarm.ts===
+/**
+ * nextRiseAlarm — the SINGLE source of truth for "which Rise alarm does Sleep
+ * to Rise hand off to, and when does it ring next".
+ *
+ * Fixes two long-standing defects:
+ *  1. Two places used to tell native when the alarm is. The Rise page computed
+ *     it correctly (respecting the chosen weekdays) while the Sleep to Rise
+ *     page recomputed a day-blind value every 30s and overwrote it. Only
+ *     `useNightToRise` writes the alarm to native now, and it uses this module.
+ *  2. The Sleep to Rise page took the FIRST enabled alarm in local storage
+ *     rather than the NEAREST upcoming one, and never looked at the alarms
+ *     saved in the user's account. Both sources are merged here.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+
+export interface AlarmLike {
+  alarm_time?: string | null;
+  time?: string | null;
+  is_enabled?: boolean;
+  enabled?: boolean;
+  days_of_week?: number[] | null;
+  daysOfWeek?: number[] | null;
+}
+
+export interface NormalizedAlarm {
+  /** "HH:MM" local time. */
+  time: string;
+  /** 0=Sun..6=Sat. Empty array means "every day". */
+  daysOfWeek: number[];
+}
+
+export interface NextRiseAlarm extends NormalizedAlarm {
+  /** Epoch ms of the next occurrence, weekday-aware. */
+  atMs: number;
+}
+
+/** Keeps only enabled alarms that carry a usable time. */
+export function normalizeAlarms(list: unknown): NormalizedAlarm[] {
+  if (!Array.isArray(list)) return [];
+  const out: NormalizedAlarm[] = [];
+  for (const raw of list as AlarmLike[]) {
+    if (!raw) continue;
+    const enabled = raw.is_enabled ?? raw.enabled ?? true;
+    if (!enabled) continue;
+    const time = (raw.alarm_time || raw.time || '').trim();
+    if (!/^\d{1,2}:\d{2}/.test(time)) continue;
+    const days = (raw.days_of_week ?? raw.daysOfWeek ?? []) as number[];
+    out.push({
+      time: time.slice(0, 5),
+      daysOfWeek: Array.isArray(days) ? days.filter((d) => d >= 0 && d <= 6) : [],
+    });
+  }
+  return out;
+}
+
+/**
+ * Nearest upcoming occurrence across every enabled alarm, honouring each
+ * alarm's own weekday list (an empty list means the alarm repeats daily).
+ */
+export function computeNextRiseAlarm(
+  alarms: NormalizedAlarm[],
+  from: Date = new Date(),
+): NextRiseAlarm | null {
+  let best: NextRiseAlarm | null = null;
+  const today = from.getDay();
+  for (const alarm of alarms) {
+    const [h, m] = alarm.time.split(':').map(Number);
+    for (let offset = 0; offset <= 7; offset++) {
+      const day = (today + offset) % 7;
+      if (alarm.daysOfWeek.length > 0 && !alarm.daysOfWeek.includes(day)) continue;
+      const when = new Date(from);
+      when.setDate(when.getDate() + offset);
+      when.setHours(h || 0, m || 0, 0, 0);
+      if (when.getTime() <= from.getTime()) continue;
+      if (!best || when.getTime() < best.atMs) {
+        best = { time: alarm.time, daysOfWeek: alarm.daysOfWeek, atMs: when.getTime() };
+      }
+      break;
+    }
+  }
+  return best;
+}
+
+function readLocalAlarms(): NormalizedAlarm[] {
+  try {
+    const raw = localStorage.getItem('local_alarms');
+    return raw ? normalizeAlarms(JSON.parse(raw)) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Reactive next-alarm reader: merges local alarms with the account's saved
+ * alarms, recomputes on storage changes and once a minute.
+ */
+export function useNextRiseAlarm(): NextRiseAlarm | null {
+  const [remote, setRemote] = useState<NormalizedAlarm[]>([]);
+  const [next, setNext] = useState<NextRiseAlarm | null>(null);
+
+  const recompute = useCallback((remoteAlarms: NormalizedAlarm[]) => {
+    const all = [...readLocalAlarms(), ...remoteAlarms];
+    setNext((prev) => {
+      const candidate = computeNextRiseAlarm(all);
+      if (
+        prev && candidate
+        && prev.atMs === candidate.atMs
+        && prev.time === candidate.time
+        && prev.daysOfWeek.join(',') === candidate.daysOfWeek.join(',')
+      ) return prev;
+      return candidate;
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: auth } = await supabase.auth.getUser();
+        if (!auth?.user) return;
+        const { data } = await supabase
+          .from('rise_alarms')
+          .select('alarm_time, days_of_week, is_enabled')
+          .eq('user_id', auth.user.id);
+        if (!cancelled && data) setRemote(normalizeAlarms(data));
+      } catch { /* offline — local alarms still apply */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    recompute(remote);
+    const id = setInterval(() => recompute(remote), 60_000);
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || e.key === 'local_alarms') recompute(remote);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => { clearInterval(id); window.removeEventListener('storage', onStorage); };
+  }, [remote, recompute]);
+
+  return next;
+}
+
+===ENDFILE===
+===FILE:src/lib/capacitor/nightToRiseBridge.ts===
+/**
+ * nightToRiseBridge — JS → native bridge for syncing Night-to-Rise config
+ * into Android SharedPreferences, so the ShieldAccessibilityService can
+ * enforce the lock at the OS level. Web/iOS: silent no-op.
+ *
+ * Native plugin name: `NightToRise` with methods setConfig({ json }),
+ * setRiseAlarm({ epochMillis }), and consumePendingBreak() [NEW].
+ */
+
+import { registerPlugin, Capacitor } from '@capacitor/core';
+import type { NightToRiseConfig } from '@/components/rise/night-to-rise/types';
+
+interface NightToRiseNativePlugin {
+  setConfig(options: { json: string }): Promise<void>;
+  setRiseAlarm(options: { epochMillis: number }): Promise<void>;
+  consumePendingBreak(): Promise<{ broke: boolean }>;
+}
+
+const Plugin = registerPlugin<NightToRiseNativePlugin>('NightToRise');
+
+const isAndroid = Capacitor.getPlatform() === 'android';
+
+export const nightToRiseBridge = {
+  async setConfig(cfg: NightToRiseConfig): Promise<void> {
+    if (!isAndroid) return;
+    try { await Plugin.setConfig({ json: JSON.stringify(cfg) }); } catch (e) {
+      console.warn('[NightToRise bridge] setConfig failed', e);
+    }
+  },
+  async setRiseAlarm(epochMillis: number): Promise<void> {
+    if (!isAndroid) return;
+    try { await Plugin.setRiseAlarm({ epochMillis }); } catch (e) {
+      console.warn('[NightToRise bridge] setRiseAlarm failed', e);
+    }
+  },
+  /**
+   * NEW: check whether the native block screen's "Emergency unlock" was
+   * tapped since the last check. Call on app mount + on resume (visibility
+   * change) so a break taken while the app wasn't in the foreground still
+   * gets recorded against the streak.
+   */
+  async consumePendingBreak(): Promise<boolean> {
+    if (!isAndroid) return false;
+    try {
+      const res = await Plugin.consumePendingBreak();
+      return res.broke;
+    } catch (e) {
+      console.warn('[NightToRise bridge] consumePendingBreak failed', e);
+      return false;
+    }
+  },
+};
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/ui/RiseRingActivity.java===
+package com.mylifeos.app.rise.ui;
+
+import android.app.Activity;
+import android.app.KeyguardManager;
+import android.content.Intent;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.util.Log;
+import android.view.WindowManager;
+
+import com.mylifeos.app.MainActivity;
+import com.mylifeos.app.rise.core.AlarmConstants;
+import com.mylifeos.app.rise.state.AlarmStateManager;
+
+/**
+ * RiseRingActivity — Lock screen এর উপরে আসে।
+ *
+ * এই Activity কেন দরকার?
+ * ──────────────────────────────────────────────────────────
+ * Capacitor এর MainActivity lock screen dismiss করে না।
+ * একটা native Activity দরকার যেটা:
+ *   → showWhenLocked flag দিয়ে lock screen এর উপরে আসে
+ *   → turnScreenOn দিয়ে screen জাগায়
+ *   → FLAG_KEEP_SCREEN_ON দিয়ে screen on রাখে
+ *   → Back button block করে
+ *
+ * এই Activity শুধু bridge হিসেবে কাজ করে।
+ * সে React ring screen এ navigate করে দেয়।
+ *
+ * Dismissal protection:
+ * ──────────────────────────────────────────────────────────
+ * ✅ Back button block (alarm চলাকালীন)
+ * ✅ onPause এ re-bring (5s delay)
+ * ✅ onResume এ state check
+ * ✅ Accidental finish() prevention
+ * ──────────────────────────────────────────────────────────
+ */
+public class RiseRingActivity extends Activity {
+
+    private static final String TAG = "RiseRingActivity";
+
+    private Handler  reBringHandler  = new Handler(Looper.getMainLooper());
+    private Runnable reBringRunnable;
+    private boolean  missionComplete = false;
+
+    // ──────────────────────────────────────────
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
+        // Lock screen এর উপরে আসো + screen জাগাও
+        enableLockscreenFlags();
+
+        Log.d(TAG, "onCreate");
+
+        // UUID বের করো
+        String uuid = extractUuid();
+
+        // Alarm active না থাকলে → main এ যাও
+        if (!AlarmStateManager.isRinging(this) && !isComingFromAlarm()) {
+            Log.w(TAG, "No active alarm — going to MainActivity");
+            goToMain(uuid);
+            return;
+        }
+
+        // React ring screen এ navigate করো
+        goToRingScreen(uuid);
+    }
+
+    // ──────────────────────────────────────────
+    // Lock screen flags
+    // ──────────────────────────────────────────
+    private void enableLockscreenFlags() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            setShowWhenLocked(true);
+            setTurnScreenOn(true);
+            KeyguardManager km = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+            if (km != null) km.requestDismissKeyguard(this, null);
+        } else {
+            //noinspection deprecation
+            getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED |
+                WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON   |
+                WindowManager.LayoutParams.FLAG_DISMISS_KEYGUARD
+            );
+        }
+        // Screen off হতে দেবো না
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+    }
+
+    // ──────────────────────────────────────────
+    // UUID extraction
+    // ──────────────────────────────────────────
+    private String extractUuid() {
+        // Intent data থেকে (deep link)
+        if (getIntent() != null && getIntent().getData() != null) {
+            String path = getIntent().getData().getPath();
+            if (path != null && path.startsWith("/rise/ring/")) {
+                return path.replace("/rise/ring/", "");
+            }
+        }
+        // Extra থেকে
+        if (getIntent() != null) {
+            String extra = getIntent().getStringExtra(AlarmConstants.EXTRA_ALARM_UUID);
+            if (extra != null) return extra;
+        }
+        // State থেকে (most reliable)
+        String stateUuid = AlarmStateManager.getActiveUuid(this);
+        if (stateUuid != null) return stateUuid;
+
+        return "fallback";
+    }
+
+    private boolean isComingFromAlarm() {
+        // Intent extras check
+        return getIntent() != null &&
+               getIntent().getStringExtra(AlarmConstants.EXTRA_ALARM_UUID) != null;
+    }
+
+    // ──────────────────────────────────────────
+    // Navigation
+    // ──────────────────────────────────────────
+    private void goToRingScreen(String uuid) {
+        try {
+            Intent intent = new Intent(this, MainActivity.class);
+            intent.setAction(Intent.ACTION_VIEW);
+            intent.setData(Uri.parse(AlarmConstants.DEEP_LINK_BASE + uuid));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
+                            Intent.FLAG_ACTIVITY_SINGLE_TOP |
+                            Intent.FLAG_ACTIVITY_CLEAR_TOP);
+            startActivity(intent);
+            // finish() করি না — back stack এ থাকি যাতে return করা যায়
+        } catch (Exception e) {
+            Log.e(TAG, "goToRingScreen failed", e);
+            goToMain(uuid);
+        }
+    }
+
+    private void goToMain(String uuid) {
+        Intent intent = new Intent(this, MainActivity.class);
+        intent.setAction(Intent.ACTION_VIEW);
+        intent.setData(Uri.parse(AlarmConstants.DEEP_LINK_BASE + uuid));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(intent);
+        finish();
+    }
+
+    // ──────────────────────────────────────────
+    // Lifecycle — anti-dismiss
+    // ──────────────────────────────────────────
+
+    @Override
+    public void onBackPressed() {
+        if (AlarmStateManager.isRinging(this) && !missionComplete) {
+            // Alarm চলছে — back block করো
+            Log.d(TAG, "Back button blocked — alarm ringing");
+            // কোনো action নেই intentionally
+        } else {
+            super.onBackPressed();
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // Resume এ alarm আর নেই = mission complete হয়েছে
+        if (!AlarmStateManager.isRinging(this)) {
+            Log.d(TAG, "onResume: alarm stopped — finishing");
+            missionComplete = true;
+            finish();
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        // User home/back চাপলে alarm চলছে থাকলে 5s এ ফিরিয়ে আনো
+        if (AlarmStateManager.isRinging(this) && !missionComplete) {
+            Log.d(TAG, "onPause: alarm still ringing — scheduling re-bring");
+            reBringRunnable = () -> {
+                if (AlarmStateManager.isRinging(this) && !missionComplete) {
+                    Log.d(TAG, "Re-bringing ring screen");
+                    String uuid = extractUuid();
+                    goToRingScreen(uuid);
+                }
+            };
+            reBringHandler.postDelayed(reBringRunnable, 5000);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (reBringRunnable != null) {
+            reBringHandler.removeCallbacks(reBringRunnable);
+        }
+    }
+
+    // Mission complete হলে JS side এ call করার জন্য
+    // (optional — JS নিজেই stopNativeRinging call করে)
+    public void onMissionComplete() {
+        missionComplete = true;
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/rise/state/AlarmStateManager.java===
+package com.mylifeos.app.rise.state;
+
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.util.Log;
+
+import com.mylifeos.app.rise.core.AlarmConstants;
+
+/**
+ * AlarmStateManager — Rise System এর persistent global state manager।
+ *
+ * কেন দরকার?
+ * ─────────────────────────────────────────────────────────────────
+ * Android এ static variables process death এ মরে যায়।
+ * Activity, Service, BroadcastReceiver সবার আলাদা lifecycle।
+ * SharedPreferences disk এ থাকে — app kill / reboot সব survive করে।
+ *
+ * এই class সব Android components এর single source of truth।
+ * JS side ও Capacitor bridge দিয়ে এটা পড়তে পারে।
+ * ─────────────────────────────────────────────────────────────────
+ *
+ * State fields:
+ *   is_ringing       → alarm বাজছে কিনা
+ *   active_uuid      → কোন alarm UUID
+ *   active_id        → numeric alarm id
+ *   mission_done     → mission complete হয়েছে কিনা
+ *   snooze_count     → কতবার snooze হয়েছে
+ *   snooze_max       → maximum allowed snooze
+ *   trigger_time     → alarm কখন trigger হয়েছিল (epoch ms)
+ *   alarm_title      → notification title
+ *   alarm_body       → notification body
+ */
+public class AlarmStateManager {
+
+    private static final String TAG = "AlarmStateManager";
+
+    // ──────────────────────────────────────────────────
+    // WRITE: Alarm trigger হলে call করো
+    // ──────────────────────────────────────────────────
+
+    /**
+     * Alarm trigger হওয়ার সাথে সাথে call করো।
+     * সব state persist করে — দুটো SharedPrefs এ লেখে:
+     *   1. RiseAlarmState   → native layer reads
+     *   2. CapacitorStorage → JS bridge reads
+     */
+    public static void setRinging(Context ctx, int id, String uuid,
+                                   String title, String body, int snoozeMax) {
+        // Native state
+        statePrefs(ctx).edit()
+            .putBoolean(AlarmConstants.KEY_IS_RINGING,   true)
+            .putString(AlarmConstants.KEY_ACTIVE_UUID,   uuid)
+            .putInt(AlarmConstants.KEY_ACTIVE_ID,        id)
+            .putBoolean(AlarmConstants.KEY_MISSION_DONE, false)
+            .putInt(AlarmConstants.KEY_SNOOZE_COUNT,     0)
+            .putInt(AlarmConstants.KEY_SNOOZE_MAX,       snoozeMax)
+            .putLong(AlarmConstants.KEY_TRIGGER_TIME,    System.currentTimeMillis())
+            .putString(AlarmConstants.KEY_ALARM_TITLE,   title != null ? title : "Rise Alarm")
+            .putString(AlarmConstants.KEY_ALARM_BODY,    body  != null ? body  : "Wake up!")
+            .apply();
+
+        // JS bridge state (Capacitor Preferences format)
+        capacitorPrefs(ctx).edit()
+            .putString(AlarmConstants.KEY_CAP_RINGING_ID, uuid)
+            .putString(AlarmConstants.KEY_RAW_RINGING_ID, uuid)
+            .apply();
+
+        Log.d(TAG, "✅ State: RINGING — id=" + id + " uuid=" + uuid);
+    }
+
+    /**
+     * Mission complete বা manual stop হলে call করো।
+     * সব ringing state clear করে।
+     */
+    public static void clearRinging(Context ctx) {
+        statePrefs(ctx).edit()
+            .putBoolean(AlarmConstants.KEY_IS_RINGING,   false)
+            .putBoolean(AlarmConstants.KEY_MISSION_DONE, true)
+            .remove(AlarmConstants.KEY_ACTIVE_UUID)
+            .remove(AlarmConstants.KEY_ACTIVE_ID)
+            .apply();
+
+        capacitorPrefs(ctx).edit()
+            .remove(AlarmConstants.KEY_CAP_RINGING_ID)
+            .remove(AlarmConstants.KEY_RAW_RINGING_ID)
+            .apply();
+
+        Log.d(TAG, "🔕 State: CLEARED");
+    }
+
+    /**
+     * Snooze হলে call করো।
+     * Count increment করে, ringing false করে (পরের alarm আবার true করবে)।
+     */
+    public static void onSnooze(Context ctx) {
+        int current = getSnoozeCount(ctx);
+        statePrefs(ctx).edit()
+            .putInt(AlarmConstants.KEY_SNOOZE_COUNT, current + 1)
+            .putBoolean(AlarmConstants.KEY_IS_RINGING, false)
+            .apply();
+
+        capacitorPrefs(ctx).edit()
+            .remove(AlarmConstants.KEY_CAP_RINGING_ID)
+            .remove(AlarmConstants.KEY_RAW_RINGING_ID)
+            .apply();
+
+        Log.d(TAG, "😴 Snooze count: " + (current + 1) + "/" + getSnoozeMax(ctx));
+    }
+
+    // ──────────────────────────────────────────────────
+    // READ
+    // ──────────────────────────────────────────────────
+
+    public static boolean isRinging(Context ctx) {
+        return statePrefs(ctx).getBoolean(AlarmConstants.KEY_IS_RINGING, false);
+    }
+
+    public static String getActiveUuid(Context ctx) {
+        String uuid = statePrefs(ctx).getString(AlarmConstants.KEY_ACTIVE_UUID, null);
+        // Fallback: capacitor prefs
+        if (uuid == null) {
+            uuid = capacitorPrefs(ctx).getString(AlarmConstants.KEY_CAP_RINGING_ID, null);
+        }
+        if (uuid == null) {
+            uuid = capacitorPrefs(ctx).getString(AlarmConstants.KEY_RAW_RINGING_ID, null);
+        }
+        return uuid;
+    }
+
+    public static int getActiveId(Context ctx) {
+        return statePrefs(ctx).getInt(AlarmConstants.KEY_ACTIVE_ID, -1);
+    }
+
+    public static boolean isMissionDone(Context ctx) {
+        return statePrefs(ctx).getBoolean(AlarmConstants.KEY_MISSION_DONE, false);
+    }
+
+    public static int getSnoozeCount(Context ctx) {
+        return statePrefs(ctx).getInt(AlarmConstants.KEY_SNOOZE_COUNT, 0);
+    }
+
+    public static int getSnoozeMax(Context ctx) {
+        return statePrefs(ctx).getInt(AlarmConstants.KEY_SNOOZE_MAX, 3);
+    }
+
+    public static long getTriggerTime(Context ctx) {
+        return statePrefs(ctx).getLong(AlarmConstants.KEY_TRIGGER_TIME, 0);
+    }
+
+    public static String getAlarmTitle(Context ctx) {
+        return statePrefs(ctx).getString(AlarmConstants.KEY_ALARM_TITLE, "Rise Alarm");
+    }
+
+    public static String getAlarmBody(Context ctx) {
+        return statePrefs(ctx).getString(AlarmConstants.KEY_ALARM_BODY, "Wake up!");
+    }
+
+    /** Alarm কতক্ষণ ধরে বাজছে (minutes) */
+    public static long getRingingDurationMinutes(Context ctx) {
+        long trigger = getTriggerTime(ctx);
+        if (trigger == 0) return 0;
+        return (System.currentTimeMillis() - trigger) / 60_000L;
+    }
+
+    /** আরো snooze করা যাবে কিনা */
+    public static boolean canSnooze(Context ctx) {
+        return getSnoozeCount(ctx) < getSnoozeMax(ctx);
+    }
+
+    /**
+     * Recovery check — alarm ringing state এ আছে কিন্তু
+     * MAX duration পার হয়ে গেছে → auto-clear করো।
+     */
+    public static boolean shouldAutoStop(Context ctx) {
+        if (!isRinging(ctx)) return false;
+        long durationMin = getRingingDurationMinutes(ctx);
+        boolean expired = durationMin >= 30;
+        if (expired) Log.w(TAG, "⚠️ Alarm ringing for " + durationMin + " min — auto-stop triggered");
+        return expired;
+    }
+
+    // ──────────────────────────────────────────────────
+    // HELPERS
+    // ──────────────────────────────────────────────────
+
+    private static SharedPreferences statePrefs(Context ctx) {
+        return ctx.getSharedPreferences(AlarmConstants.PREFS_RISE_STATE, Context.MODE_PRIVATE);
+    }
+
+    private static SharedPreferences capacitorPrefs(Context ctx) {
+        return ctx.getSharedPreferences(AlarmConstants.PREFS_CAPACITOR, Context.MODE_PRIVATE);
+    }
+}
+
+===ENDFILE===
+===FILE:android/app/src/main/java/com/mylifeos/app/AndroidManifest.xml===
+(MISSING - file not found)
+
+===ENDFILE===
