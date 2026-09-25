@@ -29,32 +29,10 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.Set;
 
-/**
- * ForegroundGuardService — the reliability layer behind app blocking.
- *
- * FIX (guard-stop): the service never stopped itself when a lock window ended
- * mid-session. sync() only started/stopped based on whether N2R is *enabled*
- * (the feature toggle), not whether a lock is *currently active*. So after
- * Sleep Guard ended at the alarm, the service kept running and kept showing
- * the block screen on every app switch.
- *
- * FIX (rise-only notification): notification was always showing "sleep lock
- * ACTIVE" even during Rise Guard because it used a hardcoded label instead
- * of reading probe.phase.
- */
 public class ForegroundGuardService extends Service {
-
     private static final String TAG = "ForegroundGuard";
     private static final String CHANNEL_ID = "shield_guard_status";
     private static final int NOTIF_ID = 4711;
-    /**
-     * SAFETY-CRITICAL (device reboot): every poll tick hits system_server
-     * (UsageStatsService + AppOps). At a fixed 1s all night, plus a second
-     * 2-minute-range queryEvents, that sustained binder load was the last
-     * remaining watchdog trigger. Poll is now adaptive: fast only while the
-     * screen is on AND a lock is active, slow otherwise, and paused while
-     * the screen is off (nothing can be opened then).
-     */
     private static final long POLL_FAST_MS = 1500L;
     private static final long POLL_IDLE_MS = 10_000L;
     private static final long POLL_SCREEN_OFF_MS = 60_000L;
@@ -68,36 +46,16 @@ public class ForegroundGuardService extends Service {
     private long a11yPermAt = 0L;
     private long lastQueryEnd = 0L;
     private String lastKnownPkg = null;
-
     private static final String PROBE_PACKAGE = "zz.lifeos.lock.probe";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Runnable tick;
     private String lastNotificationText = null;
-
-    /**
-     * SAFETY-CRITICAL (device reboot): sync() was called from
-     * onAccessibilityEvent, i.e. several times per second while the user
-     * scrolls or switches apps. Each call issued a
-     * startForegroundService()/stopService() binder transaction to
-     * ActivityManager in system_server, and each one also re-read
-     * SharedPreferences. On OEM ROMs that flood of service-start transactions
-     * trips the system_server watchdog, which restarts system_server — on the
-     * device this looks exactly like the phone rebooting on its own.
-     *
-     * sync() is now idempotent and cheap: it starts/stops only on a real state
-     * change, and never more than once every SYNC_MIN_INTERVAL_MS.
-     */
     private static final long SYNC_MIN_INTERVAL_MS = 5000L;
     private static volatile long lastSyncAt = 0L;
     private static volatile Boolean lastSyncNeeded = null;
-    /** True between onCreate and onDestroy of the running instance. */
     private static volatile boolean running = false;
 
-    /**
-     * Explicit, user-driven state change (settings saved, alarm changed, boot):
-     * bypass the rate limit so the guard starts/stops immediately.
-     */
     public static void forceSync(Context ctx) {
         lastSyncAt = 0L;
         lastSyncNeeded = null;
@@ -112,12 +70,11 @@ public class ForegroundGuardService extends Service {
             com.mylifeos.app.nighttorise.NightToRisePreferences n2rPrefs =
                 new com.mylifeos.app.nighttorise.NightToRisePreferences(ctx);
             boolean n2rOn = n2rPrefs.isEnabled();
-            Set<String> blocked = new ShieldPreferences(ctx).getBlockedApps();
-            boolean shieldOn = blocked != null && !blocked.isEmpty();
+            Set<String> allowed = new ShieldPreferences(ctx).getAllowedApps();
+            boolean shieldOn = allowed != null && !allowed.isEmpty();
             boolean needed = n2rOn || shieldOn;
             lastSyncAt = now;
 
-            // Nothing to do: desired state already matches reality.
             if (lastSyncNeeded != null && lastSyncNeeded == needed && running == needed) return;
             lastSyncNeeded = needed;
 
@@ -195,29 +152,24 @@ public class ForegroundGuardService extends Service {
         NightToRiseManager n2r = new NightToRiseManager(this);
         NightToRiseManager.Decision probe = n2r.decide(System.currentTimeMillis(), PROBE_PACKAGE);
         if (probe.shouldBlock) nextDelay = POLL_FAST_MS;
-        // Screen off: no app can be opened, so skip all system_server queries.
         String pkg = screenOn ? currentForegroundPackage() : lastKnownPkg;
 
-        boolean accessibilityAvailable =
-            com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()
+        boolean accessibilityAvailable = com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()
             || hasA11yPermCached();
 
         BlockEnforcer.noteGuardPass(probe.phase.name(), probe.shouldBlock, pkg,
             hasUsageAccess(), accessibilityAvailable);
 
-        // Announce guard start / end / timer completion to the user.
         com.mylifeos.app.nighttorise.GuardTransitionNotifier.onDecision(this, probe);
 
-        // FIX: when nothing is actively locking AND Shield has no blocked apps
-        // AND N2R feature is off — stop so Sleep Guard auto-releases correctly.
-        boolean shieldHasBlocked = false;
+        boolean shieldHasAllowed = false;
         try {
-            Set<String> blockedApps = new ShieldPreferences(this).getBlockedApps();
-            shieldHasBlocked = blockedApps != null && !blockedApps.isEmpty();
+            Set<String> allowedApps = new ShieldPreferences(this).getAllowedApps();
+            shieldHasAllowed = allowedApps != null && !allowedApps.isEmpty();
         } catch (Throwable ignored) {}
 
-        if (shieldHasBlocked) nextDelay = POLL_FAST_MS;
-        if (!probe.shouldBlock && !shieldHasBlocked && !n2r.prefs().isEnabled()) {
+        if (shieldHasAllowed) nextDelay = POLL_FAST_MS;
+        if (!probe.shouldBlock && !shieldHasAllowed && !n2r.prefs().isEnabled()) {
             stopSelf();
             return;
         }
@@ -263,11 +215,6 @@ public class ForegroundGuardService extends Service {
         return cachedA11yPerm;
     }
 
-    /**
-     * Incremental: only asks UsageStats for events since the previous query,
-     * so each call covers ~1-10s instead of repeatedly re-reading 10s + 2min
-     * windows. One small binder call per tick, at most.
-     */
     private String currentForegroundPackage() {
         if (hasUsageAccess()) {
             long now = System.currentTimeMillis();
@@ -342,7 +289,6 @@ public class ForegroundGuardService extends Service {
             String until = probe.endTimeMs > 0
                 ? new SimpleDateFormat("h:mm a", Locale.getDefault()).format(new Date(probe.endTimeMs))
                 : null;
-            // FIX: read actual phase, not hardcoded "sleep lock"
             boolean isRise = probe.phase == NightToRiseManager.Phase.RISE_LOCK;
             title = isRise
                 ? "🌅 Sleep to Rise — rise lock ACTIVE"
@@ -350,10 +296,10 @@ public class ForegroundGuardService extends Service {
             text = "Only your allowed apps can open"
                 + (until != null ? " · until " + until : "");
         } else {
-            int blockedCount = 0;
+            int allowedCount = 0;
             try {
-                Set<String> blocked = new ShieldPreferences(this).getBlockedApps();
-                blockedCount = blocked == null ? 0 : blocked.size();
+                Set<String> allowed = new ShieldPreferences(this).getAllowedApps();
+                allowedCount = allowed == null ? 0 : allowed.size();
             } catch (Throwable ignored) {}
             switch (probe.phase) {
                 case PAUSED:       title = "Sleep to Rise — paused tonight"; break;
@@ -361,8 +307,8 @@ public class ForegroundGuardService extends Service {
                 case OFF:          title = "Shield protection running"; break;
                 default:           title = "Sleep to Rise — armed"; break;
             }
-            text = blockedCount > 0
-                ? blockedCount + " app" + (blockedCount == 1 ? "" : "s") + " blocked by Shield"
+            text = allowedCount > 0
+                ? allowedCount + " app" + (allowedCount == 1 ? "" : "s") + " allowed by Shield"
                 : "Lock is not enforcing right now";
         }
 
