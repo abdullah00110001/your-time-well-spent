@@ -136,7 +136,6 @@ export function NightToRiseBlocklist({ config, update }: Props) {
           }}
         />
       </div>
-      </div>
 
       {/* Blocked sites */}
       <div>
