@@ -206,19 +206,10 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
         // Never act on our own app or the block screens (breaks self-triggering loops).
         if (packageName.equals(getPackageName())
-            || packageName.contains("ShieldBlock")
-            || packageName.contains("NightToRise")) return;
+            || packageName.contains("ShieldBlock")) return;
 
         int type = event.getEventType();
 
-        // Night to Rise — single guarded entry point (never blocks system UI /
-        // launcher / keyboard / dialer, rate-limited, auto safe-mode on loops).
-        // If it consumes the event, Shield does not also launch a block screen.
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            try {
-                if (com.mylifeos.app.nighttorise.NightToRiseEnforcer.get(this).onForegroundApp(packageName)) return;
-            } catch (Throwable t) { Log.w(TAG, "NightToRise check failed", t); }
-        }
 
         // PureShield foreground signal
         if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -313,8 +304,6 @@ public class ShieldAccessibilityService extends AccessibilityService {
              type == AccessibilityEvent.TYPE_VIEW_SCROLLED)) {
             String url = extractUrlFromBrowser(packageName, getRootInActiveWindow());
             if (url != null && !url.isEmpty() && !url.equals(lastBlockedUrl)) {
-                // PHASE 2 — Night to Rise site/keyword blocking inside lock windows.
-                if (checkNightToRiseUrl(url)) return;
                 checkAndBlockUrl(url, packageName);
             }
         }
@@ -385,27 +374,6 @@ public class ShieldAccessibilityService extends AccessibilityService {
     }
 
 
-    // ==========================================
-    // PHASE 2: Night to Rise — site / keyword blocking inside lock windows
-    // ==========================================
-    private boolean checkNightToRiseUrl(String url) {
-        try {
-            com.mylifeos.app.nighttorise.NightToRiseEnforcer enf =
-                com.mylifeos.app.nighttorise.NightToRiseEnforcer.get(this);
-            if (!enf.isLockActive(System.currentTimeMillis())) return false;
-            String host = extractDomain(url);
-            com.mylifeos.app.nighttorise.NightToRisePreferences p = enf.manager().prefs();
-            boolean domainHit = ContentMatcher.matchesDomain(host, p.blockedSites());
-            boolean keywordHit = !domainHit && ContentMatcher.matchesKeyword(url, p.blockedKeywords());
-            if (!enf.onUrl(url, host, domainHit, keywordHit)) return false;
-            lastBlockedUrl = url;
-            resetLastBlockedUrl();
-            return true;
-        } catch (Throwable t) {
-            Log.w(TAG, "NightToRise url check failed", t);
-            return false;
-        }
-    }
 
     // ==========================================
     // URL Block
