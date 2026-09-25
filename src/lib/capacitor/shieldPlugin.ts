@@ -4,6 +4,8 @@ export interface InstalledApp {
   packageName: string;
   appName: string;
   isSystem: boolean;
+  /** base64 PNG data-URL of the real launcher icon (Android only). */
+  icon?: string;
 }
 
 export interface ShieldPluginInterface {
@@ -22,7 +24,7 @@ export interface ShieldPluginInterface {
   getBlockedSites(): Promise<{ sites: string[] }>;
   blockKeywords(options: { keywords: string[] }): Promise<void>;
   getBlockedKeywords(): Promise<{ keywords: string[] }>;
-  getInstalledApps(): Promise<{ apps: InstalledApp[] }>;
+  getInstalledApps(options?: { icons?: boolean }): Promise<{ apps: InstalledApp[] }>;
   getBlockStats(): Promise<{ blockedAttemptsToday: number }>;
 
   // ৩. মোড ম্যানেজমেন্ট
@@ -76,6 +78,13 @@ export interface ShieldPluginInterface {
     customMessage: string;
   }): Promise<{ success: boolean }>;
   getAdultFilterScreen(): Promise<{ style: string; customMessage: string }>;
+  // [SHIELD-CARD] Block Screen Style -> native block card
+  updateBlockScreenOptions(options: {
+    countdown?: boolean;
+    theme?: string;
+    text?: string;
+  }): Promise<{ success: boolean }>;
+  getBlockScreenOptions(): Promise<{ countdown: boolean; theme: string; text: string }>;
 
   // 🔑 Emergency Bypass & Light Orb Timer
   setEmergencyPin(options: { pin: string }): Promise<void>;
@@ -119,7 +128,31 @@ export interface ShieldPluginInterface {
   setDayBoundary(options: { startHour?: number; autoReset?: boolean }): Promise<DayBoundary>;
   getDayBoundary(): Promise<DayBoundary>;
   getNotificationSettings(): Promise<{ vibrate: boolean; sound: boolean; lowTimeAlert: boolean }>;
+
+  // 💬 Telegram Guard (offline, accessibility-based)
+  getTelegramGuard(): Promise<TelegramGuardSettings>;
+  setTelegramGuard(options: Partial<TelegramGuardSettings>): Promise<TelegramGuardSettings>;
 }
+
+export interface TelegramGuardSettings {
+  enabled: boolean;
+  blockChats: boolean;
+  blockSearch: boolean;
+  blockInviteLinks: boolean;
+  blockAllInvites: boolean;
+  blockMedia: boolean;
+  blockAllMedia: boolean;
+}
+
+export const DEFAULT_TELEGRAM_GUARD: TelegramGuardSettings = {
+  enabled: true,
+  blockChats: true,
+  blockSearch: true,
+  blockInviteLinks: true,
+  blockAllInvites: false,
+  blockMedia: true,
+  blockAllMedia: false,
+};
 
 export interface FocusSessionState {
   active: boolean;

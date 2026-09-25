@@ -20,6 +20,8 @@ export interface RisePluginType {
     uuid: string;
     extraLoud?: boolean;
     soundUri?: string | null;  // ← NEW: custom ringtone URI
+    /** 0=Sun..6=Sat for a recurring weekly shot, -1/omitted for one-shot. */
+    dayOfWeek?: number;
   }): Promise<{ success: boolean; id: number; uuid: string }>;
   cancelAlarm(options: { id: number }): Promise<void>;
 
@@ -126,14 +128,23 @@ export const scheduleRiseAlarm = async (
   uuid: string,
   extraLoud = false,
   soundUri: string | null = null,
+  dayOfWeek = -1,
 ): Promise<boolean> => {
   if (!isNativePlatform) {
     console.log(`[RiseBridge-Web] Mock: id=${id} @ ${new Date(timeInMillis).toLocaleString()}`);
     return true;
   }
   try {
-    await RisePlugin.scheduleAlarm({ id, timeInMillis, title, body, uuid, extraLoud, soundUri });
-    console.log(`[RiseBridge] Scheduled id=${id} uuid=${uuid} extraLoud=${extraLoud} sound=${soundUri ?? 'default'}`);
+    // Native now rejects when AlarmManager refused, so a resolved call really
+    // means the OS accepted the alarm.
+    const res = await RisePlugin.scheduleAlarm({
+      id, timeInMillis, title, body, uuid, extraLoud, soundUri, dayOfWeek,
+    });
+    if (res?.success === false) {
+      console.error('[RiseBridge] scheduleAlarm reported failure', { id, uuid });
+      return false;
+    }
+    console.log(`[RiseBridge] Scheduled id=${id} uuid=${uuid} day=${dayOfWeek} extraLoud=${extraLoud} sound=${soundUri ?? 'default'}`);
     return true;
   } catch (e) {
     console.error('[RiseBridge] scheduleAlarm failed', e);
@@ -255,19 +266,29 @@ export const scheduleNativeAlarmShots = async (
     const extraLoud = config.extraLoud ?? false;
     const soundUri = config.soundUri ?? null;
 
+    let scheduled = 0;
+    let failures = 0;
+
     for (let i = 0; i < 7; i++) {
       if (!daysOfWeek.includes(i)) continue;
       const nextDate = getNextDayOfWeek(i, hours, minutes);
-      await RisePlugin.scheduleAlarm({
-        id: baseId + i,
-        timeInMillis: nextDate.getTime(),
-        title: config.title,
-        body: config.body,
-        uuid: `${uuid}_day${i}`,
+      const ok = await scheduleRiseAlarm(
+        baseId + i,
+        nextDate.getTime(),
+        config.title,
+        config.body,
+        `${uuid}_day${i}`,
         extraLoud,
         soundUri,
-      });
-      console.log(`[RiseBridge] Scheduled day=${i} id=${baseId + i} sound=${soundUri ?? 'default'}`);
+        i, // recurring weekly shot — native persists this for boot/refire
+      );
+      if (ok) scheduled++;
+      else failures++;
+    }
+
+    if (failures > 0) {
+      console.error(`[RiseBridge] ${failures} of ${scheduled + failures} shots failed to schedule`);
+      return false;
     }
     return true;
   } catch (e) {

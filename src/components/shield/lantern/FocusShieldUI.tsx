@@ -150,7 +150,7 @@ function BurnLine({ segments }: { segments: { label: string; minutes: number }[]
         {segments.map((s, i) => (
           <div
             key={s.label}
-            className="h-full transition-all duration-700"
+            className="shield-fill h-full transition-all duration-700"
             style={{
               width: `${(s.minutes / total) * 100}%`,
               background: `hsl(var(--primary) / ${0.95 - i * 0.16})`,
@@ -187,7 +187,7 @@ function WickRow({ name, minutes, max, rank }: { name: string; minutes: number; 
         </div>
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full rounded-full bg-primary transition-all duration-700"
+            className="shield-fill h-full rounded-full bg-primary transition-all duration-700"
             style={{ width: `${Math.max(4, (minutes / (max || 1)) * 100)}%` }}
           />
         </div>
@@ -308,7 +308,8 @@ function HomeScreen({
         </h1>
       </div>
 
-      <LatticePanel index={0} className="pt-6">
+      <LatticePanel index={0} className="shield-sweep relative overflow-hidden pt-6">
+        <span className="shield-aura" aria-hidden />
         {isLoading ? (
           <div className="grid h-[248px] place-items-center">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -375,7 +376,7 @@ function HomeScreen({
               key={row.id}
               type="button"
               onClick={() => onNavigate(row.page)}
-              className="flex w-full items-center justify-between gap-3 px-1 py-3 text-left transition-transform active:scale-[0.99]"
+              className="shield-tap flex w-full items-center justify-between gap-3 px-1 py-3 text-left"
             >
               <span className="flex items-center gap-3">
                 <span className="grid h-10 w-10 place-items-center rounded-xl bg-primary/10">
@@ -450,7 +451,7 @@ function HomeScreen({
 
       <button
         onClick={onOpenModes}
-        className="shield-plate flex w-full items-center gap-3 px-4 py-4 text-left transition-transform active:scale-[0.99]"
+        className="shield-tap shield-plate flex w-full items-center gap-3 px-4 py-4 text-left"
       >
         <ShieldCheck className="h-5 w-5 shrink-0 text-primary" />
         <div className="min-w-0 flex-1">

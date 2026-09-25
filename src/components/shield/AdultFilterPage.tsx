@@ -151,6 +151,23 @@ export function AdultFilterPage({ onBack, isActive }: AdultFilterPageProps) {
     if (savedKwToggle !== null) setKeywordEnabled(savedKwToggle === 'true');
     const savedSiteToggle = localStorage.getItem('shield_site_enabled');
     if (savedSiteToggle !== null) setSiteEnabled(savedSiteToggle === 'true');
+
+    // Native is the source of truth on Android — hydrate so UI never drifts.
+    if (Capacitor.getPlatform() === 'android') {
+      (async () => {
+        try {
+          const [kw, st, scr] = await Promise.all([
+            ShieldPlugin.getBlockedKeywords().catch(() => null),
+            ShieldPlugin.getBlockedSites().catch(() => null),
+            ShieldPlugin.getAdultFilterScreen().catch(() => null),
+          ]);
+          if (kw?.keywords?.length) setKeywords(kw.keywords);
+          if (st?.sites?.length) setSites(st.sites);
+          if (scr?.style) setSelectedScreen(scr.style);
+          if (scr?.style === 'custom' && scr.customMessage) setCustomMessage(scr.customMessage);
+        } catch { /* keep local values */ }
+      })();
+    }
   }, []);
 
   const addKeyword = () => {
@@ -220,8 +237,9 @@ export function AdultFilterPage({ onBack, isActive }: AdultFilterPageProps) {
         });
         // Sync keywords, sites, apps + escalation to native using the real
         // plugin method names.
-        await ShieldPlugin.blockKeywords({ keywords });
-        await ShieldPlugin.blockSites({ sites });
+        // Disabled toggles send empty lists so native stops enforcing them.
+        await ShieldPlugin.blockKeywords({ keywords: keywordEnabled ? keywords : [] });
+        await ShieldPlugin.blockSites({ sites: siteEnabled ? sites : [] });
         await ShieldPlugin.blockApps({ apps: selectedApps });
         await ShieldPlugin.setEscalationBase({ minutes: baseMinutes });
       }

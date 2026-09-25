@@ -14,27 +14,20 @@ import { Lock, Smartphone, ShieldOff, Flame, Sparkles, Hourglass } from 'lucide-
 import { Button } from '@/components/ui/button';
 import { useNightToRise } from './useNightToRise';
 import { useNightToRiseStreak } from './useNightToRiseStreak';
+import { useNextRiseAlarm } from './nextRiseAlarm';
 import { nightToRiseBridge } from '@/lib/capacitor/nightToRiseBridge';
 import { STRICT_UNLOCK_DELAY_MS } from './types';
 import { cn } from '@/lib/utils';
-
-function readNextAlarmTime(): string | null {
-  try {
-    const raw = localStorage.getItem('local_alarms');
-    if (!raw) return null;
-    const list = JSON.parse(raw) as Array<{ enabled?: boolean; time?: string }>;
-    const found = list.find((a) => a.enabled && a.time);
-    return found?.time ?? null;
-  } catch { return null; }
-}
+import { isAndroid, isNative } from '@/lib/capacitor/platform';
 
 const EXEMPT_ROUTES = ['/rise/ring', '/auth', '/reset-password'];
 const STRICT_REQUEST_KEY = 'night_to_rise_strict_request_at';
 
 export function NightToRiseGuard() {
   const { pathname } = useLocation();
-  const [alarmTime, setAlarmTime] = useState<string | null>(readNextAlarmTime);
-  const { config, status } = useNightToRise(alarmTime);
+  const riseAlarm = useNextRiseAlarm();
+  const alarmTime = riseAlarm?.time ?? null;
+  const { config, status } = useNightToRise(riseAlarm);
   const { streak, recordBreak, recordCleanNight } = useNightToRiseStreak();
   const [now, setNow] = useState(new Date());
   const [overridden, setOverridden] = useState(false);
@@ -51,13 +44,6 @@ export function NightToRiseGuard() {
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    const onStorage = (e: StorageEvent) => {
-      if (e.key === 'local_alarms') setAlarmTime(readNextAlarmTime());
-    };
-    window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, []);
 
   // Pick up breaks that happened on the NATIVE block screen.
   useEffect(() => {
@@ -76,12 +62,17 @@ export function NightToRiseGuard() {
 
   const isExempt = EXEMPT_ROUTES.some((r) => pathname.startsWith(r));
   const phase = status.phase;
-  const isLocked = (phase === 'sleep-lock' || phase === 'rise-lock') && !isExempt && !overridden;
+  // Android enforcement is native. Never cover LifeOS itself with this legacy
+  // web overlay: the user must always be able to open LifeOS during a lock.
+  const isLocked = !(isNative && isAndroid)
+    && (phase === 'sleep-lock' || phase === 'rise-lock')
+    && !isExempt
+    && !overridden;
 
   // When phase transitions off after a lock, record a clean night.
   useEffect(() => {
     if (phase === 'armed' || phase === 'off' || phase === 'inactive-day') {
-      if (alarmTime) recordCleanNight();
+      recordCleanNight();
     }
   }, [phase, alarmTime, recordCleanNight]);
 

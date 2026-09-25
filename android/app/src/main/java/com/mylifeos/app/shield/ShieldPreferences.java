@@ -29,20 +29,41 @@ public class ShieldPreferences {
         prefs.edit().putBoolean("is_enabled", enabled).apply();
     }
 
+    /**
+     * FIX (app blocking was inconsistent): SharedPreferences.getStringSet()
+     * hands back the set instance it caches internally. Callers were mutating
+     * and re-saving that very instance, which Android treats as "unchanged"
+     * (the new value == the cached value), so some writes never hit disk and
+     * readers saw a half-updated list. Every getter now returns a defensive
+     * copy and every setter stores a brand-new set.
+     */
     public Set<String> getBlockedApps() {
-        return prefs.getStringSet("blocked_apps", new HashSet<>());
+        return readSet("blocked_apps");
     }
 
     public void setBlockedApps(Set<String> apps) {
-        prefs.edit().putStringSet("blocked_apps", apps).apply();
+        writeSet("blocked_apps", apps);
     }
 
     public Set<String> getBlockedSites() {
-        return prefs.getStringSet("blocked_sites", new HashSet<>());
+        return readSet("blocked_sites");
     }
 
     public void setBlockedSites(Set<String> sites) {
-        prefs.edit().putStringSet("blocked_sites", sites).apply();
+        writeSet("blocked_sites", sites);
+    }
+
+    private Set<String> readSet(String key) {
+        Set<String> stored = prefs.getStringSet(key, null);
+        return stored == null ? new HashSet<>() : new HashSet<>(stored);
+    }
+
+    private void writeSet(String key, Set<String> values) {
+        Set<String> copy = values == null ? new HashSet<>() : new HashSet<>(values);
+        // remove() first so the platform can never short-circuit the write by
+        // comparing the new value against the identical cached instance.
+        prefs.edit().remove(key).apply();
+        prefs.edit().putStringSet(key, copy).apply();
     }
 
     // ==========================================
@@ -76,11 +97,11 @@ public class ShieldPreferences {
     }
 
     public Set<String> getBlockedKeywords() {
-        return prefs.getStringSet("blocked_keywords", new HashSet<>());
+        return readSet("blocked_keywords");
     }
 
     public void setBlockedKeywords(Set<String> keywords) {
-        prefs.edit().putStringSet("blocked_keywords", keywords).apply();
+        writeSet("blocked_keywords", keywords);
     }
 
     // ==========================================
@@ -285,6 +306,25 @@ public class ShieldPreferences {
     public int getTimerY() { return prefs.getInt("timer_y", 100); }
     public void setTimerPosition(int x, int y) { prefs.edit().putInt("timer_x", x).putInt("timer_y", y).apply(); }
     // 🎨 Adult Filter — Block Screen Style
+// [SHIELD-CARD] Block card options, synced from the "Block Screen Style" page
+public boolean isBlockCountdownEnabled() {
+    return prefs.getBoolean("block_countdown_enabled", true);
+}
+public void setBlockCountdownEnabled(boolean enabled) {
+    prefs.edit().putBoolean("block_countdown_enabled", enabled).apply();
+}
+public String getBlockScreenTheme() {
+    return prefs.getString("block_screen_theme", "");
+}
+public void setBlockScreenTheme(String theme) {
+    prefs.edit().putString("block_screen_theme", theme == null ? "" : theme).apply();
+}
+public String getBlockScreenText() {
+    return prefs.getString("block_screen_text", "");
+}
+public void setBlockScreenText(String text) {
+    prefs.edit().putString("block_screen_text", text == null ? "" : text).apply();
+}
 public String getAdultBlockScreenStyle() {
     return prefs.getString("adult_block_style", "focus");
 }
@@ -309,11 +349,11 @@ public void clearHistory() {
 // 📱 Monitored Apps (keyword scan applies here)
 // ==========================================
 public Set<String> getMonitoredApps() {
-    return prefs.getStringSet("monitored_apps", new HashSet<>());
+    return readSet("monitored_apps");
 }
 
 public void setMonitoredApps(Set<String> apps) {
-    prefs.edit().putStringSet("monitored_apps", apps).apply();
+    writeSet("monitored_apps", apps);
 }
 
 // ==========================================
@@ -446,5 +486,49 @@ public void setStartOfDayHour(int hour) {
 
 public boolean isAutoResetDailyEnabled() { return prefs.getBoolean("auto_reset_daily", true); }
 public void setAutoResetDailyEnabled(boolean v) { prefs.edit().putBoolean("auto_reset_daily", v).apply(); }
+
+// ==========================================
+// ✈️ Telegram Guard — offline 18+ enforcement inside Telegram
+// Keys mirror the JS bridge fields 1:1 (see shieldPlugin.ts TelegramGuardConfig).
+// ==========================================
+public static final String[] TELEGRAM_GUARD_KEYS = new String[]{
+    "enabled", "blockChats", "blockSearch", "blockInviteLinks",
+    "blockAllInvites", "blockMedia", "blockAllMedia"
+};
+
+private static boolean telegramDefault(String key) {
+    // Strict extras are opt-in, everything else is on by default.
+    return !("blockAllInvites".equals(key) || "blockAllMedia".equals(key));
 }
 
+public boolean getTelegramGuardOption(String key) {
+    return prefs.getBoolean("tg_guard_" + key, telegramDefault(key));
+}
+
+public void setTelegramGuardOption(String key, boolean value) {
+    prefs.edit().putBoolean("tg_guard_" + key, value).apply();
+    // Without this, a running ShieldAccessibilityService keeps using its cached
+    // TelegramGuard.Config (loaded at some earlier, unrelated point) until some
+    // other event happens to reload it — so turning the guard off here would not
+    // actually take effect until the service was restarted. This makes the
+    // toggle take effect immediately.
+    try {
+        com.mylifeos.app.shield.ShieldAccessibilityService.refreshContentConfiguration();
+    } catch (Throwable ignored) {
+        // Service may not be running yet (e.g. accessibility permission not granted) — fine.
+    }
+}
+
+public com.mylifeos.app.shield.core.TelegramGuard.Config getTelegramGuardConfig() {
+    com.mylifeos.app.shield.core.TelegramGuard.Config cfg =
+        new com.mylifeos.app.shield.core.TelegramGuard.Config();
+    cfg.enabled          = getTelegramGuardOption("enabled");
+    cfg.blockChats       = getTelegramGuardOption("blockChats");
+    cfg.blockSearch      = getTelegramGuardOption("blockSearch");
+    cfg.blockInviteLinks = getTelegramGuardOption("blockInviteLinks");
+    cfg.blockAllInvites  = getTelegramGuardOption("blockAllInvites");
+    cfg.blockMedia       = getTelegramGuardOption("blockMedia");
+    cfg.blockAllMedia    = getTelegramGuardOption("blockAllMedia");
+    return cfg;
+}
+}

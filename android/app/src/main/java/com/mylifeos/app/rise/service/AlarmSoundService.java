@@ -300,12 +300,15 @@ public class AlarmSoundService extends Service {
 
             mediaPlayer.setLooping(true);
             mediaPlayer.setOnPreparedListener(mp -> {
-                boolean userCrescendo = AlarmSettingsPreferences.isCrescendoEnabled(this);
-                if (extraLoud || userCrescendo) {
-                    mp.setVolume(0f, 0f);
+                // Section 0.3 — the ramp is the default behaviour now: start low
+                // and climb smoothly to full volume over the configured duration.
+                boolean ramp = extraLoud || AlarmSettingsPreferences.isCrescendoEnabled(this);
+                if (ramp) {
+                    float start = AlarmSettingsPreferences.RAMP_START_FRACTION;
+                    mp.setVolume(start, start);
                     mp.start();
                     startCrescendo(mp);
-                    Log.d(TAG, "🔊 Sound playing — CRESCENDO mode");
+                    Log.d(TAG, "🔊 Sound playing — RAMP mode");
                 } else {
                     mp.setVolume(1.0f, 1.0f);
                     mp.start();
@@ -329,27 +332,37 @@ public class AlarmSoundService extends Service {
         }
     }
 
+    /**
+     * Section 0.3 — gradual volume ramp.
+     *
+     * Steps the MediaPlayer volume from RAMP_START_FRACTION (18%) up to 1.0 in
+     * 1-second steps across the user-configured ramp duration (default 45s,
+     * key "alarm.volumeRampSeconds"). Applies to whatever ringtone the user
+     * picked, since it acts on the shared MediaPlayer instance.
+     */
     private void startCrescendo(MediaPlayer mp) {
         if (crescendoHandler != null) crescendoHandler.removeCallbacksAndMessages(null);
-        final int   STEPS     = 60;
-        final long  INTERVAL  = 500L;
-        final float INCREMENT = 1.0f / STEPS;
-        final float[] vol     = {0f};
+        final int   rampSeconds = AlarmSettingsPreferences.getRampSeconds(this);
+        final long  INTERVAL    = 1000L;
+        final int   steps       = Math.max(1, rampSeconds);
+        final float start       = AlarmSettingsPreferences.RAMP_START_FRACTION;
+        final float increment   = (1.0f - start) / steps;
+        final float[] vol       = { start };
         Runnable ramp = new Runnable() {
             @Override
             public void run() {
                 if (mp == null || !isRunning) return;
-                vol[0] = Math.min(1.0f, vol[0] + INCREMENT);
+                vol[0] = Math.min(1.0f, vol[0] + increment);
                 try { mp.setVolume(vol[0], vol[0]); } catch (Exception ignored) {}
                 if (vol[0] < 1.0f) {
                     crescendoHandler.postDelayed(this, INTERVAL);
                 } else {
-                    Log.d(TAG, "🔊 Crescendo complete — max volume");
+                    Log.d(TAG, "🔊 Volume ramp complete — max volume");
                 }
             }
         };
         crescendoHandler.postDelayed(ramp, INTERVAL);
-        Log.d(TAG, "Crescendo started (30s ramp)");
+        Log.d(TAG, "Volume ramp started (" + rampSeconds + "s)");
     }
 
     private void scheduleMediaPlayerRecovery() {

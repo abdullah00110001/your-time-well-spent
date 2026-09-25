@@ -17,4 +17,6 @@ export interface PureShieldMetrics {
 export interface InstalledAppItem {
   packageName: string;
   appName: string;
+  /** base64 PNG data-URL of the real launcher icon (Android only). */
+  icon?: string;
 }

@@ -5,7 +5,6 @@ import android.content.SharedPreferences;
 import android.util.Log;
 
 import com.mylifeos.app.rise.core.AlarmConstants;
-import com.mylifeos.app.rise.nighttorise.NightToRiseManager;
 
 /**
  * AlarmStateManager — Rise System এর persistent global state manager।
@@ -85,10 +84,6 @@ public class AlarmStateManager {
             .remove(AlarmConstants.KEY_CAP_RINGING_ID)
             .remove(AlarmConstants.KEY_RAW_RINGING_ID)
             .apply();
-
-        // Sleep to Rise: the alarm is now truly off (mission complete or
-        // manual stop) — this is the exact moment Rise Guard should start.
-        NightToRiseManager.onAlarmDismissed(ctx);
 
         Log.d(TAG, "🔕 State: CLEARED");
     }
@@ -196,4 +191,3 @@ public class AlarmStateManager {
         return ctx.getSharedPreferences(AlarmConstants.PREFS_CAPACITOR, Context.MODE_PRIVATE);
     }
 }
-

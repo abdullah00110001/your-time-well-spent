@@ -108,7 +108,9 @@ public class ShieldTimerManager {
                 | Intent.FLAG_ACTIVITY_CLEAR_TOP
                 | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
                 | Intent.FLAG_ACTIVITY_NO_ANIMATION);
-            context.startActivity(intent);
+            // [SHIELD-CARD] overlay first; activity only if no overlay can be drawn.
+            com.mylifeos.app.shield.core.BlockEnforcer.presentShield(context, intent,
+                () -> { ShieldAccessibilityService.goHomeViaAccessibility(); });
             prefs.incrementBlockedAttempts();
             Log.d(TAG, "🛑 Daily limit reached — blocked " + packageName);
         } catch (Throwable t) {

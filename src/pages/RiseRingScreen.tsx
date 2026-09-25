@@ -64,7 +64,7 @@ export default function RiseRingScreen() {
   const isCompletedRef    = useRef(false);
   const audioRef          = useRef<HTMLAudioElement | null>(null);
   const vibrationTimer    = useRef<number | null>(null);
-  const hasClearedRinging = useRef(false);
+  
 
   useEffect(() => {
     setPresence({ status: phase === 'wake' ? 'waking' : 'in_rise_mission' });
@@ -91,11 +91,11 @@ export default function RiseRingScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!isNative || hasClearedRinging.current) return;
-    hasClearedRinging.current = true;
-    clearRingingAlarmId().catch(console.error);
-  }, []);
+  // NOTE: the ringing flag is intentionally NOT cleared on mount. It used to be,
+  // which meant the native state said "not ringing" the moment this screen
+  // rendered — so a kill/relaunch lost the alarm and Rise Guard never armed.
+  // The flag is cleared only by an explicit dismiss/mission completion
+  // (stopAlarm → clearRingingAlarmId).
 
   // ✅ alarm load — alarm-specific config প্রায়োরিটি পায়
   useEffect(() => {

@@ -21,7 +21,7 @@ public class PureShieldConfig {
     private PureShieldBlurView.BlurStyle blurStyle = PureShieldBlurView.BlurStyle.PIXELATE;
     private float confidenceThreshold = 0.40f;
     private int blurOpacity               = 100;
-    private int blurPaddingPct            = 15;
+    private int blurPaddingPct = 35;
     private int minFaceSizePct            = 2;
     private int maxFaces                  = 100;
     private boolean debugOverlay          = false;

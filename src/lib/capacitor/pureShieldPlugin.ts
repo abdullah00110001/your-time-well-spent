@@ -23,6 +23,8 @@ export interface PureShieldConfig {
 export interface InstalledApp {
   packageName: string;
   appName:     string;
+  /** base64 PNG data-URL of the real launcher icon (Android only). */
+  icon?:       string;
 }
 
 export interface PermissionStatus {

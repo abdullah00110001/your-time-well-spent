@@ -1,18 +1,16 @@
 // Focus Shield V2.0 - Unique Light Ritual Design. No Blue. No Clone.
 // Settings > Blocking — the two large databases, searchable and toggleable.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Globe, Languages, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
-  ADULT_SITES, ADULT_SITE_COUNT, searchAdultSites,
-} from '@/data/shield/adultSites';
-import {
-  BN_KEYWORDS, BN_KEYWORD_COUNT, searchBnKeywords,
-} from '@/data/shield/bnKeywords';
+  loadAdultSites, loadBnKeywords, searchAdultSites, searchBnKeywords,
+  type AdultSiteDb, type BnKeywordDb,
+} from '@/lib/shield/blockLists';
 import { loadBlockingDb, saveBlockingDb, type BlockingDbSettings } from '@/lib/shield/settingsStore';
 
 const GOLD = '#FFD166';
@@ -23,6 +21,15 @@ export function BlockingDatabasesPage({ onBack }: Props) {
   const [db, setDb] = useState<BlockingDbSettings>(loadBlockingDb);
   const [siteQuery, setSiteQuery] = useState('');
   const [kwQuery, setKwQuery] = useState('');
+  const [siteDb, setSiteDb] = useState<AdultSiteDb | null>(null);
+  const [kwDb, setKwDb] = useState<BnKeywordDb | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    loadAdultSites().then((d) => { if (alive) setSiteDb(d); }).catch(() => {});
+    loadBnKeywords().then((d) => { if (alive) setKwDb(d); }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
 
   const patch = (p: Partial<BlockingDbSettings>) => {
     const next = { ...db, ...p };
@@ -31,13 +38,17 @@ export function BlockingDatabasesPage({ onBack }: Props) {
   };
 
   const sites = useMemo(
-    () => (siteQuery ? searchAdultSites(siteQuery, 150) : ADULT_SITES.slice(0, 150)),
-    [siteQuery],
+    () => (siteDb ? searchAdultSites(siteDb, siteQuery, 150) : []),
+    [siteDb, siteQuery],
   );
   const keywords = useMemo(
-    () => (kwQuery ? searchBnKeywords(kwQuery, 150) : BN_KEYWORDS.slice(0, 150)),
-    [kwQuery],
+    () => (kwDb ? searchBnKeywords(kwDb, kwQuery, 150) : []),
+    [kwDb, kwQuery],
   );
+  const siteCount = siteDb?.count ?? 0;
+  const kwCount = kwDb?.count ?? 0;
+  const loading = !siteDb || !kwDb;
+
 
   return (
     <div className="min-h-screen bg-background pb-24">
@@ -48,7 +59,7 @@ export function BlockingDatabasesPage({ onBack }: Props) {
         <div>
           <h1 className="text-base font-bold">Blocking Databases</h1>
           <p className="text-[11px] text-muted-foreground">
-            {ADULT_SITE_COUNT.toLocaleString()} domains · {BN_KEYWORD_COUNT} Bengali keywords
+            {loading ? 'Loading lists…' : `${siteCount.toLocaleString()} domains · ${kwCount} Bengali keywords`}
           </p>
         </div>
       </div>
@@ -64,7 +75,7 @@ export function BlockingDatabasesPage({ onBack }: Props) {
             <ToggleCard
               icon={Globe}
               title="Adult site list"
-              hint={`${ADULT_SITE_COUNT.toLocaleString()} domains, subdomains and mirrors`}
+              hint={`${siteCount.toLocaleString()} domains, subdomains and mirrors`}
               on={db.adultSitesEnabled}
               onChange={(v) => patch({ adultSitesEnabled: v })}
             />

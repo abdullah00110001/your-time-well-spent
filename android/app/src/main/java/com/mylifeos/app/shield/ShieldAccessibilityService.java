@@ -18,6 +18,7 @@ import android.os.Bundle;
 
 import com.mylifeos.app.shield.core.BlockLoopGuard;
 import com.mylifeos.app.shield.core.ContentMatcher;
+import com.mylifeos.app.shield.core.BlockingOverlay;
 
 import java.util.Set;
 import java.util.List;
@@ -37,15 +38,173 @@ public class ShieldAccessibilityService extends AccessibilityService {
     private ShieldTimerManager timerManager;
 
 
-    private String lastBlockedPackage = "";
+    /** [SHIELD-CARD] "keyword" for user-defined keywords, otherwise "adult". */
+    private volatile String pendingBlockKind = "adult";
     private String lastBlockedUrl = "";
     private long lastScanTime = 0;
 
     private static final long SCAN_COOLDOWN_MS = 1500;
 
+    /**
+     * De-duplication window for the block screen. This is NOT a cooldown that
+     * lets an app through: enforcement (leaving the blocked app) always runs,
+     * this only stops us from stacking identical block activities when Android
+     * emits several window events for the same launch.
+     */
+    private static final long BLOCK_SCREEN_DEDUPE_MS = 700;
+    private final java.util.HashMap<String, Long> lastBlockScreenAt = new java.util.HashMap<>();
+
+    /**
+     * Throttle for enforcement driven by TYPE_WINDOW_CONTENT_CHANGED, which can
+     * fire dozens of times per second. Per package so a genuine app switch is
+     * never swallowed by another app's throttle.
+     */
+    private static final long CONTENT_ENFORCE_THROTTLE_MS = 400;
+    private final java.util.HashMap<String, Long> lastContentEnforceAt = new java.util.HashMap<>();
+
+    /**
+     * Rate-limits the PureShield foreground signal: at most one per package
+     * change, and never more than one every 1.5s for the same package.
+     */
+    private static final long PURESHIELD_SIGNAL_THROTTLE_MS = 1500;
+    private String lastPureShieldPkg = null;
+    private long lastPureShieldSignalAt = 0L;
+
+    private boolean allowPureShieldSignal(String pkg) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (pkg != null && pkg.equals(lastPureShieldPkg)
+            && now - lastPureShieldSignalAt < PURESHIELD_SIGNAL_THROTTLE_MS) {
+            return false;
+        }
+        lastPureShieldPkg = pkg;
+        lastPureShieldSignalAt = now;
+        return true;
+    }
+
+    private boolean allowContentEnforce(String pkg) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        Long prev = lastContentEnforceAt.get(pkg);
+        if (prev != null && now - prev < CONTENT_ENFORCE_THROTTLE_MS) return false;
+        lastContentEnforceAt.put(pkg, now);
+        return true;
+    }
+
+    /** True when a fresh block screen should be shown for this package now. */
+
+    private boolean allowBlockScreen(String pkg) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        Long prev = lastBlockScreenAt.get(pkg);
+        if (prev != null && now - prev < BLOCK_SCREEN_DEDUPE_MS) return false;
+        lastBlockScreenAt.put(pkg, now);
+        return true;
+    }
+
+    /**
+     * Live handle on the running accessibility service.
+     *
+     * Root cause this fixes: {@link com.mylifeos.app.shield.core.ForegroundGuardService}
+     * used a HOME *intent* to pull the user out of a blocked app. On Android 10+
+     * background activity starts from a service are silently dropped, so the
+     * poll-driven enforcement path never actually left the blocked app — the
+     * lock "looked active" but nothing happened. Accessibility services are
+     * exempt from that restriction, so route the action through here when the
+     * service is connected.
+     */
+    private static volatile ShieldAccessibilityService instance = null;
+
+    public static boolean goHomeViaAccessibility() {
+        ShieldAccessibilityService svc = instance;
+        if (svc == null) return false;
+        try { return svc.performGlobalAction(GLOBAL_ACTION_HOME); }
+        catch (Throwable t) { return false; }
+    }
+
+    /**
+     * Launch a blocking activity from the actual bound accessibility service.
+     * Android treats this context differently from an ordinary foreground
+     * service when applying background-activity launch restrictions.
+     */
+    public static boolean launchBlockActivity(Intent intent) {
+        ShieldAccessibilityService svc = instance;
+        if (svc == null || intent == null) return false;
+        try {
+            svc.startActivity(intent);
+            return true;
+        } catch (Throwable t) {
+            Log.w(TAG, "Accessibility block-screen launch rejected", t);
+            return false;
+        }
+    }
+
+    public static void scheduleBlockingOverlay(boolean sleepToRise, boolean rise,
+                                               String title, String message, Runnable onHome) {
+        ShieldAccessibilityService svc = instance;
+        if (svc == null) return;
+        new Handler(Looper.getMainLooper()).postDelayed(() -> {
+            ShieldAccessibilityService current = instance;
+            if (current != null) {
+                BlockingOverlay.show(current, sleepToRise, rise, title, message, onHome);
+            }
+        }, 450);
+    }
+
+    public static boolean showBlockingOverlay(boolean sleepToRise, boolean rise,
+                                              String title, String message, Runnable onHome) {
+        ShieldAccessibilityService svc = instance;
+        return svc != null && BlockingOverlay.show(svc, sleepToRise, rise, title, message, onHome);
+    }
+
+    public static void dismissBlockingOverlay() { BlockingOverlay.hide(); }
+
+    /** [SHIELD-CARD] Draws the shared Shield block card as an accessibility overlay. */
+    public static boolean showShieldCard(com.mylifeos.app.shield.core.ShieldBlockCard.Spec spec, Runnable onHome) {
+        ShieldAccessibilityService svc = instance;
+        return svc != null && BlockingOverlay.showCard(svc, spec, onHome);
+    }
+
+    public static void refreshContentConfiguration() {
+        ShieldAccessibilityService svc = instance;
+        if (svc != null) svc.loadMonitoredApps();
+    }
+
+    public static boolean isConnected() { return instance != null; }
+
+    /** Immediately leaves the blocked app so its content is never usable. */
+    private void leaveBlockedApp() {
+        // Used only if the dedicated block activity could not be presented.
+        // Do not queue BACK after HOME: a delayed BACK can land on a newly
+        // opened block activity and make the screen appear to never launch.
+        try { performGlobalAction(GLOBAL_ACTION_HOME); } catch (Throwable ignored) {}
+    }
+
+
     private Set<String> adultKeywordsSet = new HashSet<>();
+    /** Bengali adult keywords (bn_keywords.txt). Shipped for a long time, never read until now. */
+    private Set<String> bnKeywordsSet    = new HashSet<>();
     private Set<String> adultSitesList   = new HashSet<>();
     private Set<String> monitoredApps    = new HashSet<>();
+
+    /** Cached Telegram Guard config; refreshed via {@link #refreshContentConfiguration()}. */
+    private volatile com.mylifeos.app.shield.core.TelegramGuard.Config telegramConfig =
+        new com.mylifeos.app.shield.core.TelegramGuard.Config();
+    private static final long TELEGRAM_INSPECT_THROTTLE_MS = 350;
+    private long lastTelegramInspectAt = 0;
+
+    /**
+     * Union of every keyword source: built-in English, built-in Bengali and the
+     * user's own custom words. Used for typed text, on-screen content, URLs and
+     * Telegram inspection so a custom word is enforced everywhere, not only
+     * while typing.
+     */
+    private Set<String> allKeywords() {
+        Set<String> all = new HashSet<>(adultKeywordsSet);
+        all.addAll(bnKeywordsSet);
+        if (preferences != null) {
+            Set<String> custom = preferences.getBlockedKeywords();
+            if (custom != null) all.addAll(custom);
+        }
+        return all;
+    }
 
     // Dynamically-resolved set of packages that can handle http:// links, refreshed on
     // package-added broadcasts. The hardcoded list below is kept ONLY as a union fallback
@@ -60,7 +219,53 @@ public class ShieldAccessibilityService extends AccessibilityService {
         "brazzers", "bangbros", "livejasmin", "camgirl", "webcamgirl",
         "freecam", "dirtygirl", "slutload", "slutroulette", "faphouse",
         "cumlouder", "beeg", "xnxx", "fuq", "tnaflix", "4tube",
-        "youjizz", "mofos", "teamskeet", "realitykings", "naughtyamerica"
+        "youjizz", "mofos", "teamskeet", "realitykings", "naughtyamerica",
+        // Moved here from adult_keywords.txt: these are site/brand names, not
+        // generic content words, so they belong in domain/URL matching only —
+        // free chat/typed text should never trigger on a brand-name collision.
+        "21sextury", "3movs", "69games", "adameve",
+        "adultfriendfinder", "adulttime", "alohatube", "americansexdolls",
+        "analgalore", "anyshemale", "ashemaletube", "assoass",
+        "avn", "babepedia", "badjojo", "badoinkvr",
+        "bangstars", "bdsmstreak", "bellesa", "bemyhole",
+        "besttrannypornsites", "bigassporn", "bigporn", "boyfriendtv",
+        "camsfinder", "camsoda", "camsodaai", "camster",
+        "candyai", "chaturbate.lat", "clips4sale", "colliderporn",
+        "czechvr", "digitalplayground", "dondiai", "dorcelclub",
+        "elegantangel", "eporner", "eroticbeauties", "fakku",
+        "findafuckbuddy", "flingster", "flirtcamai", "forhertube",
+        "forum.adultdvdtalk", "freelocalsex", "freeones", "frolicme",
+        "fyptt", "gamcore", "gamesofdesire", "gay0day",
+        "gaymaletube", "gayxo", "gelbooru", "girlsway",
+        "gptgirlfriend", "grannytube", "handjobhub", "hentaigasm",
+        "highreply", "homemadegalore", "homepornking", "hotmilfsfuck",
+        "hotporntubes", "hqporn", "ichatonline", "imlive",
+        "iporntv", "ixxx", "jav.guru", "javhd",
+        "jerkmate", "jerkroulette", "joylovedolls", "lesbify",
+        "lesbosland", "lobstertube", "lovehomeporn", "machotube",
+        "madeporn", "maturetube", "megatube", "melonstube",
+        "milfmovs", "milfporn", "mopoga", "myfreecams",
+        "mypornbible", "myporngay", "myspicyvanilla", "newsensations",
+        "nutaku", "penispictures", "perfectgirls", "pichunter",
+        "playboy", "porcore", "porn.biz", "porn300",
+        "porn7", "porndoe", "porngames", "porngameshub",
+        "pornhat", "pornhub", "pornid", "pornmd",
+        "pornone", "pornpic", "pornplanner", "pornprosnetwork",
+        "pornworks", "pussyspace", "qorno", "rabbitscams",
+        "rat.xxx", "rawrides", "realsexdoll", "rosetoy",
+        "royalcamslive", "rule34", "secretsai", "sexlikereal",
+        "sexmessenger", "sexvid", "sexyai", "sexymeet",
+        "sexyrealsexdolls", "skyprivate", "smutr", "spicychat",
+        "spizoo", "stasyq", "stripchatvr", "sugarlab",
+        "superporn", "sweepsex", "sxyprn", "teenmegaworld",
+        "theyarehuge", "tiava", "tikporn", "tubebdsm",
+        "tubegalore", "tubepornstars", "tubev", "twistys",
+        "videosz", "viewgals", "vipwank", "vjav",
+        "voyeur-house", "vrbangers", "vrporn", "vrsmash",
+        "wankzvr", "xanimu", "xbabe", "xcafe",
+        "xgroovy", "xtease", "xvideos", "xxxbunker",
+        "xxxfollow", "xxxtik", "youporngay", "yourdoll",
+        "youx", "zbporn", "zenra", "zzztube",
     };
 
     // Fallback-only hardcoded browser list (union with dynamically resolved packages).
@@ -78,12 +283,26 @@ public class ShieldAccessibilityService extends AccessibilityService {
         "com.zhiliaoapp.musically", "com.ss.android.ugc.trill",
         "org.telegram.messenger", "com.twitter.android",
         "com.reddit.frontpage",
+        // Telegram forks — same rendered UI as official Telegram, so typed-keyword
+        // blocking (Feature 5) and screen-content scanning must cover them too.
+        // Keep in sync with TelegramGuard.TELEGRAM_PACKAGES.
+        "org.telegram.messenger.web", "org.telegram.messenger.beta",
+        "org.telegram.plus", "org.thunderdog.challegram",
+        "nekox.messenger", "tw.nekomimi.nekogram",
+        "com.iMe.android", "org.telegram.BifToGram",
+        "ir.ilmili.telegraph", "org.mmessenger.messenger",
     };
 
     // Known in-app-webview hosts: apps that embed a WebView and can render arbitrary URLs.
     private static final String[] IN_APP_WEBVIEW_PACKAGES = new String[]{
         "com.facebook.katana", "com.instagram.android", "org.telegram.messenger",
         "com.twitter.android", "com.reddit.frontpage", "com.zhiliaoapp.musically",
+        // Telegram forks — kept in sync with CONTENT_SCAN_PACKAGES above.
+        "org.telegram.messenger.web", "org.telegram.messenger.beta",
+        "org.telegram.plus", "org.thunderdog.challegram",
+        "nekox.messenger", "tw.nekomimi.nekogram",
+        "com.iMe.android", "org.telegram.BifToGram",
+        "ir.ilmili.telegraph", "org.mmessenger.messenger",
     };
 
     // ==========================================
@@ -93,24 +312,47 @@ public class ShieldAccessibilityService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
-        preferences      = new ShieldPreferences(this);
-        escalationManager = new ShieldEscalationManager(this);
-        firewall         = new ShieldAppFirewall(this);
-        loopGuard        = new BlockLoopGuard(this);
-        timerManager     = new ShieldTimerManager(this);
+        // Publish the instance FIRST. Everything below is best-effort: if any
+        // init step throws (a missing asset, an OEM receiver restriction), the
+        // service must still be able to enforce blocks instead of dying and
+        // leaving the lock "active but doing nothing".
+        instance = this;
+        try {
+            preferences      = new ShieldPreferences(this);
+            escalationManager = new ShieldEscalationManager(this);
+            firewall         = new ShieldAppFirewall(this);
+            loopGuard        = new BlockLoopGuard(this);
+            timerManager     = new ShieldTimerManager(this);
+        } catch (Throwable t) {
+            Log.e(TAG, "Shield init failed", t);
+        }
 
-        loadAdultKeywordsFromAssets();
-        loadAdultSitesFromAssets();
-        loadMonitoredApps();
-        refreshResolvedBrowserPackages();
-        registerPackageAddedReceiver();
+        try { loadAdultKeywordsFromAssets(); } catch (Throwable t) { Log.w(TAG, "keywords", t); }
+        try { loadAdultSitesFromAssets(); }   catch (Throwable t) { Log.w(TAG, "sites", t); }
+        try { loadMonitoredApps(); }          catch (Throwable t) { Log.w(TAG, "monitored", t); }
+        try { refreshResolvedBrowserPackages(); } catch (Throwable t) { Log.w(TAG, "browsers", t); }
+        try { registerPackageAddedReceiver(); } catch (Throwable t) { Log.w(TAG, "receiver", t); }
+        // Service just connected: apply the real state immediately instead of
+        // waiting out the throttle window in sync().
+        try { com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(this); }
+        catch (Throwable t) { Log.w(TAG, "guard sync", t); }
+        try { com.mylifeos.app.nighttorise.NightToRiseManager.invalidateSafetyCache(); }
+        catch (Throwable ignored) {}
         Log.d(TAG, "🛡️ Shield Connected — keywords: " + adultKeywordsSet.size()
             + ", sites: " + adultSitesList.size()
             + ", browsers: " + getAllBrowserPackages().size());
     }
 
     @Override
+    public boolean onUnbind(Intent intent) {
+        instance = null;
+        return super.onUnbind(intent);
+    }
+
+    @Override
     public void onDestroy() {
+        instance = null;
+        BlockingOverlay.hide();
         super.onDestroy();
         try {
             if (packageAddedReceiver != null) unregisterReceiver(packageAddedReceiver);
@@ -122,13 +364,17 @@ public class ShieldAccessibilityService extends AccessibilityService {
             @Override
             public void onReceive(Context context, Intent intent) {
                 refreshResolvedBrowserPackages();
-                loopGuard.refreshLauncherPackage();
+                if (loopGuard != null) loopGuard.refreshLauncherPackage();
             }
         };
         IntentFilter filter = new IntentFilter(Intent.ACTION_PACKAGE_ADDED);
         filter.addDataScheme("package");
-        registerReceiver(packageAddedReceiver, filter);
+        // Android 14+ (targetSdk 34/35) throws when the export flag is missing.
+        androidx.core.content.ContextCompat.registerReceiver(
+            this, packageAddedReceiver, filter,
+            androidx.core.content.ContextCompat.RECEIVER_NOT_EXPORTED);
     }
+
 
     /** Queries PackageManager for every activity that can handle an http:// VIEW intent. */
     private void refreshResolvedBrowserPackages() {
@@ -161,21 +407,29 @@ public class ShieldAccessibilityService extends AccessibilityService {
         if (saved != null) monitoredApps.addAll(saved);
         monitoredApps.addAll(getAllBrowserPackages());
         for (String p : CONTENT_SCAN_PACKAGES) monitoredApps.add(p);
+        try { telegramConfig = preferences.getTelegramGuardConfig(); }
+        catch (Throwable t) { Log.w(TAG, "telegram config", t); }
         Log.d(TAG, "📱 Monitored apps: " + monitoredApps.size());
     }
 
     private void loadAdultKeywordsFromAssets() {
+        loadKeywordAsset("adult_keywords.txt", adultKeywordsSet);
+        loadKeywordAsset("bn_keywords.txt", bnKeywordsSet);
+        Log.d(TAG, "Keywords loaded — en: " + adultKeywordsSet.size() + ", bn: " + bnKeywordsSet.size());
+    }
+
+    private void loadKeywordAsset(String asset, Set<String> into) {
         try {
             BufferedReader reader = new BufferedReader(
-                new InputStreamReader(getAssets().open("adult_keywords.txt")));
+                new InputStreamReader(getAssets().open(asset), "UTF-8"));
             String line;
             while ((line = reader.readLine()) != null) {
                 String trimmed = line.trim().toLowerCase();
-                if (!trimmed.isEmpty()) adultKeywordsSet.add(trimmed);
+                if (!trimmed.isEmpty() && !trimmed.startsWith("#")) into.add(trimmed);
             }
             reader.close();
         } catch (IOException e) {
-            Log.e(TAG, "Error loading adult keywords", e);
+            Log.e(TAG, "Error loading " + asset, e);
         }
     }
 
@@ -206,13 +460,41 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
         // Never act on our own app or the block screens (breaks self-triggering loops).
         if (packageName.equals(getPackageName())
-            || packageName.contains("ShieldBlock")) return;
+            || packageName.contains("ShieldBlock")
+            || packageName.contains("NightToRise")) return;
 
         int type = event.getEventType();
 
+        // Sleep to Rise + Shield app blocking run through the same enforcer for
+        // both state and content events. Several OEMs only emit content changes
+        // for cold app launches; limiting this to state changes made Sleep to
+        // Rise silently miss those launches.
+        boolean sharedEnforceEvent = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+        if (!sharedEnforceEvent
+            && type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            && allowContentEnforce(packageName)) {
+            sharedEnforceEvent = true;
+        }
+        if (sharedEnforceEvent) {
+            com.mylifeos.app.shield.core.BlockEnforcer.noteForeground(packageName);
+            com.mylifeos.app.shield.core.ForegroundGuardService.sync(this);
+            com.mylifeos.app.shield.core.BlockEnforcer.Result r =
+                com.mylifeos.app.shield.core.BlockEnforcer.enforce(this, packageName, this::leaveBlockedApp);
+            if (r.blocked) return;
+        }
 
         // PureShield foreground signal
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        //
+        // SAFETY-CRITICAL (device reboot): this fired startService() for EVERY
+        // window-content and scroll event — dozens of ActivityManager binder
+        // transactions per second while simply scrolling a feed. Combined with
+        // the guard-service sync above it flooded system_server, whose watchdog
+        // then restarts it (indistinguishable from a phone reboot). The signal
+        // only carries a package name, so send it on real changes only.
+        if ((type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
+            || type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            || type == AccessibilityEvent.TYPE_VIEW_SCROLLED)
+            && allowPureShieldSignal(packageName)) {
             try {
                 com.mylifeos.app.shield.vision.PureShieldService svc =
                     com.mylifeos.app.shield.vision.PureShieldService.instance;
@@ -236,24 +518,25 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
         // ==========================================
         // Feature 1: Escalation + App Block
+        //
+        // FIX: enforcement used to run ONLY on TYPE_WINDOW_STATE_CHANGED. On
+        // MIUI / OneUI / HyperOS many app launches surface as
+        // TYPE_WINDOW_CONTENT_CHANGED only, so blocked apps opened normally.
+        // Both event types now enforce; content-changed is throttled per
+        // package so we don't walk the tree on every frame.
         // ==========================================
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+        boolean enforceEvent = type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED;
+        if (!enforceEvent
+            && type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+            && allowContentEnforce(packageName)) {
+            enforceEvent = true;
+        }
+
+        if (enforceEvent) {
             if (escalationManager.isAppBlocked(packageName)) {
                 long remaining = escalationManager.getRemainingMs(packageName);
                 showEscalationBlockScreen(packageName, remaining);
                 return;
-            }
-
-            Set<String> blockedApps = preferences.getBlockedApps();
-            if (blockedApps != null && blockedApps.contains(packageName)) {
-                if (!packageName.equals(lastBlockedPackage)) {
-                    lastBlockedPackage = packageName;
-                    preferences.incrementBlockedAttempts();
-                    showBlockScreen(packageName, false);
-                }
-                return;
-            } else {
-                lastBlockedPackage = "";
             }
 
             // ==========================================
@@ -267,6 +550,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
                 Log.w(TAG, "Daily limit enforcement failed", t);
             }
         }
+
 
 
         // ==========================================
@@ -309,26 +593,69 @@ public class ShieldAccessibilityService extends AccessibilityService {
         }
 
         // ==========================================
-        // Feature 4: Content Scan (screen text) — scoped to browsers + monitored apps only.
+        // Feature 3b: Telegram Guard — chats, search, invite links, media.
+        // Telegram exposes no URL, so the rendered tree is the only signal.
         // ==========================================
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            long now = System.currentTimeMillis();
-            if (now - lastScanTime < SCAN_COOLDOWN_MS) return;
-            if (!isContentScanTarget(packageName)) return;
-
-            lastScanTime = now;
-            AccessibilityNodeInfo rootNode = getRootInActiveWindow();
-            if (rootNode != null) {
-                String host = isBrowser(packageName) ? extractDomain(lastBlockedUrl) : null;
-                if (scanForAdultContent(rootNode, 0, host)) {
-                    triggerAdultBlock("Adult Screen Content", packageName);
-                    return;
+        if (com.mylifeos.app.shield.core.TelegramGuard.isTelegram(packageName)
+            && telegramConfig != null && telegramConfig.enabled
+            && preferences.isAdultFilterEnabled()
+            && (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+                type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+                type == AccessibilityEvent.TYPE_VIEW_SCROLLED)) {
+            long nowTg = android.os.SystemClock.elapsedRealtime();
+            if (nowTg - lastTelegramInspectAt >= TELEGRAM_INSPECT_THROTTLE_MS) {
+                lastTelegramInspectAt = nowTg;
+                try {
+                    com.mylifeos.app.shield.core.TelegramGuard.Verdict v =
+                        com.mylifeos.app.shield.core.TelegramGuard.inspect(
+                            getRootInActiveWindow(), allKeywords(), telegramConfig);
+                    if (v.block) {
+                        Log.d(TAG, "✈️ " + v.reason);
+                        triggerAdultBlock(v.reason, packageName);
+                        return;
+                    }
+                } catch (Throwable t) {
+                    Log.w(TAG, "Telegram inspect failed", t);
                 }
-                if (preferences.isReelsBlockEnabled() &&
-                    isSocialMediaApp(packageName) &&
-                    scanForReelsFast(rootNode, 0)) {
-                    triggerBackActionWithToast("Shorts / Reels Blocked 🚫");
-                    return;
+            }
+        }
+
+        // ==========================================
+        // Feature 4: Content Scan (screen text) — scoped to browsers + monitored apps only.
+        // Runs on open, on content updates AND while scrolling (feeds load lazily,
+        // so a scan only at window-open time missed everything below the fold).
+        // ==========================================
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ||
+            type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED ||
+            type == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            long now = System.currentTimeMillis();
+            if (now - lastScanTime >= SCAN_COOLDOWN_MS && isContentScanTarget(packageName)) {
+                lastScanTime = now;
+                AccessibilityNodeInfo rootNode = getRootInActiveWindow();
+                if (rootNode != null) {
+                    String host = isBrowser(packageName) ? extractDomain(lastBlockedUrl) : null;
+                    if (preferences.isAdultFilterEnabled()) {
+                        if (scanForAdultContent(rootNode, 0, host)) {
+                            triggerAdultBlock("Adult Screen Content", packageName);
+                            return;
+                        }
+                        if (scanForKeywordContent(rootNode, 0, bnKeywordsSet)) {
+                            triggerAdultBlock("Adult Screen Content (bn)", packageName);
+                            return;
+                        }
+                    }
+                    Set<String> customKeywords = preferences.getBlockedKeywords();
+                    if (scanForKeywordContent(rootNode, 0, customKeywords)) {
+                        preferences.incrementBlockedAttempts();
+                        triggerAdultBlock("Custom keyword on screen", packageName);
+                        return;
+                    }
+                    if (preferences.isReelsBlockEnabled() &&
+                        isSocialMediaApp(packageName) &&
+                        scanForReelsFast(rootNode, 0)) {
+                        triggerBackActionWithToast("Shorts / Reels Blocked 🚫");
+                        return;
+                    }
                 }
             }
         }
@@ -353,7 +680,9 @@ public class ShieldAccessibilityService extends AccessibilityService {
             if (text != null && text.length() > 0) {
                 String typed = text.toString();
 
-                if (ContentMatcher.matchesKeyword(typed, adultKeywordsSet)) {
+                if (preferences.isAdultFilterEnabled()
+                    && (ContentMatcher.matchesKeyword(typed, adultKeywordsSet)
+                        || ContentMatcher.matchesKeyword(typed, bnKeywordsSet))) {
                     clearFocusedInput(packageName);
                     triggerAdultBlock("Typed Adult Keyword", packageName);
                     return;
@@ -373,6 +702,9 @@ public class ShieldAccessibilityService extends AccessibilityService {
         }
     }
 
+
+    // Sleep to Rise has no site/keyword model anymore — enforcement is
+    // allowlist-only at the package level (see onAccessibilityEvent).
 
 
     // ==========================================
@@ -420,6 +752,15 @@ public class ShieldAccessibilityService extends AccessibilityService {
             resetLastBlockedUrl();
             return;
         }
+        Set<String> blockedKeywords = preferences.getBlockedKeywords();
+        if (blockedKeywords != null
+            && ContentMatcher.matchesKeyword(url, blockedKeywords)) {
+            lastBlockedUrl = url;
+            preferences.incrementBlockedAttempts();
+            triggerAdultBlock("Custom keyword in URL", packageName);
+            resetLastBlockedUrl();
+            return;
+        }
     }
 
     /**
@@ -428,12 +769,29 @@ public class ShieldAccessibilityService extends AccessibilityService {
      * whole hostnames themselves), so we specifically look for the pattern as a full
      * dot-delimited label of the host — never a raw substring of the whole host string.
      */
+    /**
+     * Short, ambiguous tokens ("sex", "adult", ...) live inside perfectly innocent
+     * hostnames (sussex.ac.uk, adultlearning.org). They only count as a hit when they
+     * are a whole token of the label, i.e. delimited by a non-letter character.
+     * Distinctive brand tokens ("xhamster", "brazzers", ...) may match as substrings.
+     */
+    private static final Set<String> GENERIC_DOMAIN_TOKENS = new HashSet<>(java.util.Arrays.asList(
+        "porn", "xxx", "sex", "nude", "naked", "hentai", "erotic", "adult", "nsfw"
+    ));
+
     private boolean hasAdultDomainSubstringPattern(String host) {
         if (host == null || host.isEmpty()) return false;
-        String[] labels = host.split("\\.");
+        String[] labels = host.toLowerCase(java.util.Locale.ROOT).split("\\.");
         for (String label : labels) {
+            // Split each label into letter-runs, so "xxx-tube" / "sex1" / "hd_porn"
+            // still yield the bare token while "sussex" stays a single run.
+            String[] tokens = label.split("[^a-z]+");
             for (String pattern : ADULT_DOMAIN_PATTERNS) {
-                if (label.equals(pattern) || label.contains(pattern)) return true;
+                boolean generic = GENERIC_DOMAIN_TOKENS.contains(pattern);
+                for (String token : tokens) {
+                    if (token.isEmpty()) continue;
+                    if (generic ? token.equals(pattern) : token.contains(pattern)) return true;
+                }
             }
         }
         return false;
@@ -457,9 +815,9 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
         if (hard) {
             Log.d(TAG, "🔞 HARD BLOCK | " + reason + " | pkg: " + packageName);
+            writeDebugLog("HARD_BLOCK", reason, packageName);
             loopGuard.registerTrigger(packageName);
             preferences.incrementBlockedAttempts();
-            performGlobalAction(GLOBAL_ACTION_BACK);
 
             if (packageName != null && !packageName.isEmpty()) {
                 escalationManager.registerOffense(packageName);
@@ -467,28 +825,105 @@ public class ShieldAccessibilityService extends AccessibilityService {
                 firewall.blockApp(packageName, blockDurationMs);
             }
 
-            new Handler(Looper.getMainLooper()).postDelayed(
-                () -> showBlockScreen(packageName, true), 150);
+            // Cover the screen FIRST, then leave the app underneath — this way the
+            // flagged content (or a flash of whatever is behind it) is never visible,
+            // even for a moment. Previously BACK fired immediately but the block
+            // screen only appeared ~150ms later, leaving a visible gap.
+            pendingBlockKind = classifyBlockKind(reason);
+            showBlockScreen(packageName, true);
+            performGlobalAction(GLOBAL_ACTION_BACK);
             return;
         }
 
         if (loopGuard.shouldSoftBlock(packageName)) {
             Log.d(TAG, "🟡 SOFT BLOCK | " + reason + " | pkg: " + packageName);
+            writeDebugLog("SOFT_BLOCK", reason, packageName);
             loopGuard.registerTrigger(packageName);
             preferences.incrementBlockedAttempts();
             performGlobalAction(GLOBAL_ACTION_BACK);
+
+            String toastMessage = "Blocked content avoided";
+            if (packageName != null && !packageName.isEmpty()) {
+                try {
+                    long remainingMs = escalationManager.getRemainingMs(packageName);
+                    long remainingMin = Math.max(1, remainingMs / 60_000);
+                    if (remainingMs > 0) {
+                        toastMessage = "App blocked for " + remainingMin + " min";
+                    }
+                } catch (Throwable ignored) {
+                    // Fall back to the generic message if escalation state isn't available yet.
+                }
+            }
+            final String finalToastMessage = toastMessage;
             new Handler(Looper.getMainLooper()).postDelayed(() ->
-                Toast.makeText(getApplicationContext(), "Blocked content avoided", Toast.LENGTH_SHORT).show(), 150);
+                Toast.makeText(getApplicationContext(), finalToastMessage, Toast.LENGTH_SHORT).show(), 150);
             return;
         }
 
         // Neither soft nor hard is allowed right now (cooldown/backoff active) — do nothing,
         // this is intentional: it breaks accidental infinite back-loops.
         Log.d(TAG, "⏸️ Trigger suppressed by BlockLoopGuard | " + reason + " | pkg: " + packageName);
+        writeDebugLog("SUPPRESSED", reason, packageName);
+    }
+
+    // ==========================================
+    // TEMPORARY debug log — remove once the good-group false-positive bug is found.
+    // Appends one line per block decision to a plain text file under this app's own
+    // external files dir, readable with any file manager, no adb/PC needed:
+    //   Android/data/com.mylifeos.app/files/shield_debug.log
+    // Capped at the last 200 lines so it can never grow unbounded.
+    // ==========================================
+    private static final int DEBUG_LOG_MAX_LINES = 200;
+
+    private void writeDebugLog(String kind, String reason, String packageName) {
+        try {
+            java.io.File dir = getExternalFilesDir(null);
+            if (dir == null) return;
+            java.io.File logFile = new java.io.File(dir, "shield_debug.log");
+
+            String line = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                .format(new java.util.Date())
+                + " | " + kind
+                + " | reason: " + reason
+                + " | pkg: " + packageName;
+
+            java.util.List<String> lines = new java.util.ArrayList<>();
+            if (logFile.exists()) {
+                try (java.io.BufferedReader r = new java.io.BufferedReader(new java.io.FileReader(logFile))) {
+                    String l;
+                    while ((l = r.readLine()) != null) lines.add(l);
+                } catch (Throwable ignored) {}
+            }
+            lines.add(line);
+            while (lines.size() > DEBUG_LOG_MAX_LINES) lines.remove(0);
+
+            try (java.io.BufferedWriter w = new java.io.BufferedWriter(new java.io.FileWriter(logFile, false))) {
+                for (String l : lines) { w.write(l); w.newLine(); }
+            }
+        } catch (Throwable t) {
+            // Never let debug logging itself cause a problem for the real blocking logic.
+            Log.w(TAG, "writeDebugLog failed", t);
+        }
     }
 
     private void triggerAdultBlock(String reason) {
         triggerAdultBlock(reason, null);
+    }
+
+    /** [SHIELD-CARD] User-defined keyword reasons all start with "Custom". */
+    private static String classifyBlockKind(String reason) {
+        if (reason == null) return "adult";
+        return reason.toLowerCase(java.util.Locale.ROOT).startsWith("custom") ? "keyword" : "adult";
+    }
+
+    /** [SHIELD-CARD] Overlay-first; falls back to the activity inside BlockEnforcer.presentShield. */
+    private void presentBlock(Intent intent) {
+        try {
+            com.mylifeos.app.shield.core.BlockEnforcer.presentShield(this, intent, null);
+        } catch (Throwable t) {
+            Log.w(TAG, "presentShield failed, starting activity", t);
+            try { startActivity(intent); } catch (Throwable ignored) {}
+        }
     }
 
     // ==========================================
@@ -498,11 +933,12 @@ public class ShieldAccessibilityService extends AccessibilityService {
         Intent intent = new Intent(this, ShieldBlockActivity.class);
         if (packageName != null) intent.putExtra("BLOCKED_PACKAGE", packageName);
         intent.putExtra("IS_ADULT_BLOCK", isAdultBlock);
+        intent.putExtra("BLOCK_KIND", pendingBlockKind);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
             Intent.FLAG_ACTIVITY_CLEAR_TOP |
             Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS |
             Intent.FLAG_ACTIVITY_NO_ANIMATION);
-        startActivity(intent);
+        presentBlock(intent);
     }
 
     private void showEscalationBlockScreen(String packageName, long remainingMs) {
@@ -518,7 +954,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
                 Intent.FLAG_ACTIVITY_CLEAR_TOP |
                 Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS |
                 Intent.FLAG_ACTIVITY_NO_ANIMATION);
-            startActivity(intent);
+            presentBlock(intent);
         }, 150);
     }
 
@@ -583,6 +1019,21 @@ public class ShieldAccessibilityService extends AccessibilityService {
         }
         for (int i = 0; i < node.getChildCount(); i++) {
             if (scanForAdultContent(node.getChild(i), depth + 1, host)) return true;
+        }
+        return false;
+    }
+
+    private boolean scanForKeywordContent(AccessibilityNodeInfo node, int depth, Set<String> keywords) {
+        if (node == null || depth > 12 || keywords == null || keywords.isEmpty()) return false;
+        if (node.isPassword()) return false;
+        CharSequence text = node.getText();
+        CharSequence description = node.getContentDescription();
+        if ((text != null && ContentMatcher.matchesKeyword(text.toString(), keywords))
+            || (description != null && ContentMatcher.matchesKeyword(description.toString(), keywords))) {
+            return true;
+        }
+        for (int i = 0; i < node.getChildCount(); i++) {
+            if (scanForKeywordContent(node.getChild(i), depth + 1, keywords)) return true;
         }
         return false;
     }
@@ -720,3 +1171,4 @@ public class ShieldAccessibilityService extends AccessibilityService {
         Log.e(TAG, "Shield Accessibility Service Interrupted");
     }
 }
+

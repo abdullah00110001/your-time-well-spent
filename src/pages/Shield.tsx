@@ -20,11 +20,13 @@ import { LifeosGroupsHome } from '@/components/groups/LifeosGroupsHome';
 import { BlockAppsPage } from '@/components/shield/pages/BlockAppsPage';
 import { BlockSitesPage } from '@/components/shield/pages/BlockSitesPage';
 import { BlockKeywordsPage } from '@/components/shield/pages/BlockKeywordsPage';
+import { TelegramGuardPage } from '@/components/shield/pages/TelegramGuardPage';
 import { FloatingTimerSettings } from '@/components/shield/FloatingTimerSettings';
 import { BlockScreenSettingsPage } from '@/components/shield/BlockScreenSettingsPage';
 import { OrbTimerSettingsPage } from '@/components/shield/OrbTimerSettingsPage';
 import { BlockingDatabasesPage } from '@/components/shield/BlockingDatabasesPage';
 import { AppLockSettingsPage } from '@/components/shield/AppLockSettingsPage';
+import { AdultFilterPage } from '@/components/shield/AdultFilterPage';
 import { DailyLimitsPage } from '@/components/shield/DailyLimitsPage';
 import { PureShieldMainSettings } from '@/components/shield/pureShield/PureShieldMainSettings';
 import { isNative } from '@/lib/capacitor/platform';
@@ -53,7 +55,7 @@ import {
 
 import type { StrictnessMode } from '@/components/shield/ShieldModes';
 import { normalizeShieldMode } from '@/components/shield/ShieldModes';
-type SubPage = 'main' | 'block-screen' | 'block-apps' | 'block-sites' | 'block-keywords' | 'floating-timer' | 'pure-shield' | 'blocking-db' | 'app-lock' | 'daily-limits';
+type SubPage = 'main' | 'block-screen' | 'block-apps' | 'block-sites' | 'block-keywords' | 'telegram-guard' | 'floating-timer' | 'pure-shield' | 'blocking-db' | 'app-lock' | 'daily-limits' | 'adult-filter';
 
 interface DisciplineProfile {
   id: string;
@@ -373,8 +375,8 @@ export default function ShieldPage() {
   };
 
   const VALID_SUBPAGES: SubPage[] = [
-    'block-screen', 'block-apps', 'block-sites', 'block-keywords',
-    'floating-timer', 'pure-shield', 'blocking-db', 'app-lock', 'daily-limits',
+    'block-screen', 'block-apps', 'block-sites', 'block-keywords', 'telegram-guard',
+    'floating-timer', 'pure-shield', 'blocking-db', 'app-lock', 'daily-limits', 'adult-filter',
   ];
 
   const handleNavigate = (page: string) => {
@@ -509,10 +511,12 @@ export default function ShieldPage() {
   if (subPage === 'block-apps') return <BlockAppsPage onBack={() => setSubPage('main')} />;
   if (subPage === 'block-sites') return <BlockSitesPage onBack={() => setSubPage('main')} />;
   if (subPage === 'block-keywords') return <BlockKeywordsPage onBack={() => setSubPage('main')} />;
+  if (subPage === 'telegram-guard') return <TelegramGuardPage onBack={() => setSubPage('main')} />;
   if (subPage === 'blocking-db') return <BlockingDatabasesPage onBack={() => setSubPage('main')} />;
   if (subPage === 'floating-timer') return <OrbTimerSettingsPage onBack={() => setSubPage('main')} />;
   if (subPage === 'app-lock') return <AppLockSettingsPage onBack={() => setSubPage('main')} />;
   if (subPage === 'daily-limits') return <DailyLimitsPage onBack={() => setSubPage('main')} />;
+  if (subPage === 'adult-filter') return <AdultFilterPage onBack={() => setSubPage('main')} isActive={adultToggle} />;
   if (subPage === 'pure-shield') return <PureShieldMainSettings onBack={() => setSubPage('main')} />;
 
   if (isLoading) {

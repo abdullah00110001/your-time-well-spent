@@ -32,6 +32,25 @@ import com.mylifeos.app.rise.state.AlarmStateManager;
  * Schedule করার উপায়:
  *   AlarmRecoveryReceiver.schedule(context) → কল করো alarm trigger এর পরে।
  *   AlarmRecoveryReceiver.cancel(context)   → কল করো alarm stop এর পরে।
+ *
+ * FIX (mission-reset bug): forceRingScreenForeground() used to fire a
+ * deep-link intent (capacitor://.../rise/ring/<uuid>) at MainActivity
+ * unconditionally every ~6 seconds while the alarm was ringing — even while
+ * MainActivity was ALREADY open and the user was mid-mission. Each one
+ * triggered onNewIntent() -> the React router re-navigated to the ring route
+ * -> the ring screen remounted -> in-progress mission state (solvedCount
+ * etc.) was wiped, over and over, every 6 seconds.
+ *
+ * Now this checks MainActivity.isForeground first:
+ *   - already visible -> do nothing at all (nothing to "force to foreground")
+ *   - not visible      -> re-bring WITHOUT deep-link data (matches the same
+ *                         technique already used in MainActivity's own
+ *                         onUserLeaveHint watchdog), so if the activity
+ *                         happens to still be alive in the background,
+ *                         bringing it forward doesn't itself trigger a
+ *                         React re-navigation either. A plain re-launch with
+ *                         no data is enough to surface the existing WebView;
+ *                         handleAlarmIntent() no-ops for it either way.
  * ─────────────────────────────────────────────────────────────────
  */
 public class AlarmRecoveryReceiver extends BroadcastReceiver {
@@ -62,8 +81,14 @@ public class AlarmRecoveryReceiver extends BroadcastReceiver {
             } else {
                 Log.d(TAG, "✅ Service OK — alarm still ringing");
             }
-            // Force the ring screen back to foreground every cycle (Alarmy-style)
-            forceRingScreenForeground(context);
+            // FIX: only force the screen up if the app isn't already visible.
+            // Re-firing this while MainActivity is already open was what wiped
+            // in-progress mission state every ~6 seconds.
+            if (com.mylifeos.app.MainActivity.isForeground) {
+                Log.d(TAG, "📱 MainActivity already foreground — skipping force-bring");
+            } else {
+                forceRingScreenForeground(context);
+            }
             // Re-arm a quick recovery so the user can't escape for long
             scheduleQuick(context);
         } else {
@@ -76,13 +101,15 @@ public class AlarmRecoveryReceiver extends BroadcastReceiver {
         try {
             String uuid = AlarmStateManager.getActiveUuid(ctx);
             if (uuid == null) return;
+            // FIX: no deep-link data/extras here — a plain REORDER_TO_FRONT
+            // re-launch is enough to surface MainActivity if it's still alive
+            // in the background, and (crucially) does NOT trigger
+            // handleAlarmIntent()'s deep-link branch, so the React router
+            // never re-navigates and any in-progress mission state survives.
             Intent show = new Intent(ctx, com.mylifeos.app.MainActivity.class);
-            show.setAction(Intent.ACTION_VIEW);
-            show.setData(android.net.Uri.parse(AlarmConstants.DEEP_LINK_BASE + uuid));
             show.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK |
                 Intent.FLAG_ACTIVITY_SINGLE_TOP |
-                Intent.FLAG_ACTIVITY_CLEAR_TOP |
                 Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
             );
             ctx.startActivity(show);

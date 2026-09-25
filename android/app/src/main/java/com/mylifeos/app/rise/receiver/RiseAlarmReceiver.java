@@ -15,6 +15,9 @@ import androidx.core.app.NotificationCompat;
 
 import com.mylifeos.app.MainActivity;
 import com.mylifeos.app.rise.core.AlarmConstants;
+import com.mylifeos.app.rise.core.AlarmTimeMath;
+import com.mylifeos.app.rise.scheduler.RiseAlarmScheduler;
+import com.mylifeos.app.rise.scheduler.RiseAlarmStore;
 import com.mylifeos.app.rise.recovery.AlarmRecoveryReceiver;
 import com.mylifeos.app.rise.service.AlarmSoundService;
 import com.mylifeos.app.rise.state.AlarmStateManager;
@@ -48,6 +51,7 @@ public class RiseAlarmReceiver extends BroadcastReceiver {
         showFullScreenNotification(context, alarmId, uuid, title, body);
         forceOpenApp(context, uuid);
         AlarmRecoveryReceiver.schedule(context);
+        rescheduleIfRecurring(context, alarmId);
 
         Log.d(TAG, "✅ All alarm actions dispatched");
     }
@@ -150,6 +154,32 @@ public class RiseAlarmReceiver extends BroadcastReceiver {
         int flags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) flags |= PendingIntent.FLAG_IMMUTABLE;
         return PendingIntent.getActivity(ctx, reqCode, buildRingIntent(ctx, uuid), flags);
+    }
+
+    /**
+     * Recurring weekly shots used to become one-time alarms: once a weekday
+     * shot fired, nothing re-armed it, so the alarm silently stopped after the
+     * first week. Every fire now schedules the same shot for its next weekly
+     * occurrence using the persisted payload (title, uuid, sound, loudness).
+     */
+    private void rescheduleIfRecurring(Context ctx, int alarmId) {
+        try {
+            RiseAlarmStore.Shot shot = RiseAlarmStore.get(ctx, alarmId);
+            if (shot == null || shot.dayOfWeek < 0) return; // one-shot alarm
+
+            long now  = System.currentTimeMillis();
+            long next = AlarmTimeMath.rollForwardWeekly(
+                shot.timeInMillis > 0 ? shot.timeInMillis : now, now);
+
+            boolean ok = RiseAlarmScheduler.scheduleAlarm(
+                ctx, shot.id, next, shot.title, shot.body, shot.uuid,
+                shot.extraLoud, shot.soundUri, shot.dayOfWeek);
+
+            Log.d(TAG, (ok ? "🔁 Rescheduled" : "❌ Failed to reschedule")
+                    + " recurring shot id=" + shot.id + " next=" + next);
+        } catch (Throwable t) {
+            Log.e(TAG, "rescheduleIfRecurring failed for id=" + alarmId, t);
+        }
     }
 
     public static void stopSound(Context context) {

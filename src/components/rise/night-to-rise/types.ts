@@ -11,19 +11,11 @@ export interface NightToRiseConfig {
   sleepTime: string; // "HH:MM" 24h
   sleepLockMinutesBefore: number;
   riseLockMinutesAfter: number;
-  allowedApps: AllowedApp[];
-  /** PHASE 2 — distraction apps blocked during sleep/rise windows. */
-  blockedApps: AllowedApp[];
-  /** PHASE 2 — distracting sites blocked in the browser during lock windows. */
-  blockedSites: string[];
-  /** PHASE 2 — block any URL/search containing these keywords. */
-  blockedKeywords: string[];
   /**
-   * PHASE 2 — enforcement strategy:
-   *  - 'blocklist': only the blocked apps/sites are locked
-   *  - 'allowlist': everything is locked except the allowed apps (stricter)
+   * The ONLY apps that may be opened while a lock window is active.
+   * Everything else is blocked by default (allowlist model).
    */
-  blocklistMode: 'blocklist' | 'allowlist';
+  allowedApps: AllowedApp[];
   sleepBlockMessage: string;
   riseBlockMessage: string;
   scheduleMode: ScheduleMode;
@@ -40,9 +32,41 @@ export interface NightToRiseConfig {
    * feature can't be used to silently disable protection every night.
    */
   pauseHistory: string[];
+  /** SECTION 4 — strict mode 24h commitment lock (ISO date) while enabled. */
+  strictLockedUntil?: string | null;
+  /** SECTION 4 — pending emergency-unlock request (epoch ms) under strict mode. */
+  strictUnlockRequestedAt?: number | null;
+  /** SECTION 4 — chronotype onboarding result. */
+  chronotype?: 'lark' | 'neutral' | 'owl' | null;
+  chronotypeAnswered?: boolean;
+  /** Gradual Shift Assistant — intermediate target while easing to sleepTime. */
+  shiftTargetTime?: string | null;
+  /** Custom-schedule weekend target (used for the social-jetlag warning). */
+  weekendSleepTime?: string | null;
+  /** Alarm volume ramp length in seconds (mirrored to native prefs). */
+  alarmRampSeconds?: number;
+  /** Which guards the user wants. Either, both, or one alone. */
+  sleepGuardEnabled: boolean;
+  riseGuardEnabled: boolean;
+  /**
+   * How Sleep Guard ends:
+   *  - 'until-alarm' → keeps holding right up to the rise alarm
+   *  - 'duration'    → switches itself off N minutes after it started
+   */
+  sleepGuardEndMode: 'until-alarm' | 'duration';
+  /** Minutes Sleep Guard runs when sleepGuardEndMode === 'duration'. */
+  sleepGuardDurationMinutes: number;
+  /**
+   * Hard ceiling (hours) on how long Sleep Guard may run with no alarm
+   * attached. Spec default: 10 hours. Mirrored to native preferences.
+   */
+  safetyCapHours: number;
 }
 
-/** PHASE 2 — popular distraction apps suggested by default. */
+export type SleepGuardEndMode = NightToRiseConfig['sleepGuardEndMode'];
+
+
+/** Popular apps, used as a web fallback list inside the app picker. */
 export const SUGGESTED_BLOCK_APPS: AllowedApp[] = [
   { id: 'com.facebook.katana', name: 'Facebook' },
   { id: 'com.instagram.android', name: 'Instagram' },
@@ -56,16 +80,6 @@ export const SUGGESTED_BLOCK_APPS: AllowedApp[] = [
   { id: 'com.reddit.frontpage', name: 'Reddit' },
 ];
 
-/** PHASE 2 — commonly blocked distracting sites. */
-export const SUGGESTED_BLOCK_SITES = [
-  'facebook.com',
-  'instagram.com',
-  'tiktok.com',
-  'youtube.com',
-  'x.com',
-  'reddit.com',
-];
-
 export const DEFAULT_CONFIG: NightToRiseConfig = {
   enabled: false,
   sleepTime: '22:30',
@@ -77,10 +91,6 @@ export const DEFAULT_CONFIG: NightToRiseConfig = {
     { id: 'com.google.android.deskclock', name: 'Clock (Google)' },
   ],
 
-  blockedApps: SUGGESTED_BLOCK_APPS.slice(0, 4),
-  blockedSites: [],
-  blockedKeywords: [],
-  blocklistMode: 'blocklist',
   sleepBlockMessage: 'Time to rest. Put the phone down. 🌙',
   riseBlockMessage: 'Start your morning right. No scrolling yet. 🌅',
   scheduleMode: 'everyday',
@@ -91,7 +101,26 @@ export const DEFAULT_CONFIG: NightToRiseConfig = {
   configured: false,
   shareWithGroup: false,
   pauseHistory: [],
+  strictLockedUntil: null,
+  strictUnlockRequestedAt: null,
+  chronotype: null,
+  chronotypeAnswered: false,
+  shiftTargetTime: null,
+  weekendSleepTime: null,
+  alarmRampSeconds: 45,
+  sleepGuardEnabled: true,
+  riseGuardEnabled: true,
+  sleepGuardEndMode: 'until-alarm',
+  sleepGuardDurationMinutes: 180,
+  safetyCapHours: 10,
 };
+
+/** SECTION 4 — strict mode commits the user for 24 hours. */
+export const STRICT_LOCK_MS = 24 * 60 * 60 * 1000;
+
+/** Reasons offered when pausing for one night. */
+export const PAUSE_REASONS = ['Travel', 'Emergency', 'Illness', 'Other'] as const;
+export type PauseReason = (typeof PAUSE_REASONS)[number];
 
 /**
  * Apps that can never be blocked, for user safety. Enforced in the UI so a

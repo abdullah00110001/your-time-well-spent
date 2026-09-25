@@ -532,21 +532,25 @@ input, textarea, [contenteditable="true"] {
   background: hsl(var(--background));
 }
 
-/* Subtle ambient tint per phase — token based, no hard-coded palette. */
-.n2r[data-phase='sleep-lock'] {
-  background:
-    radial-gradient(120% 70% at 50% -10%, hsl(var(--primary) / 0.10) 0%, transparent 60%),
-    hsl(var(--background));
-}
-.n2r[data-phase='rise-lock'] {
-  background:
-    radial-gradient(120% 70% at 50% -10%, hsl(var(--warning) / 0.14) 0%, transparent 60%),
-    hsl(var(--background));
+/* Surfaces are plain cards so Sleep to Rise matches every other screen. */
+.n2r-surface {
+  background: hsl(var(--card));
 }
 
-/* Typography follows the app: Nunito / Hind Siliguri, mono for timers only. */
-.n2r-display { font-family: inherit; font-weight: 700; letter-spacing: -0.01em; }
-.n2r-mono { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+.n2r-accent-text { color: hsl(var(--primary)); }
+.n2r-accent-bg { background: hsl(var(--primary)); }
+.n2r-accent-ring { box-shadow: 0 0 0 1px hsl(var(--primary) / 0.45); }
+
+/* Numerals keep the app font; only tabular figures are enforced. */
+.n2r-display {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+.n2r-mono {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum';
+}
 
 .n2r-card {
   background: hsl(var(--card));
@@ -584,22 +588,9 @@ input, textarea, [contenteditable="true"] {
 
 .n2r-muted { color: hsl(var(--muted-foreground)); }
 
-@keyframes n2r-flicker {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  45% { opacity: 0.78; transform: scale(0.96); }
-  70% { opacity: 0.92; transform: scale(1.02); }
-}
-.n2r-flame { animation: n2r-flicker 3.2s ease-in-out infinite; }
-
-@keyframes n2r-dawn-glow {
-  0%, 100% { opacity: 0.3; transform: scale(1); }
-  50% { opacity: 0.5; transform: scale(1.06); }
-}
-.n2r-dawn-glow { animation: n2r-dawn-glow 6s ease-in-out infinite; }
-
-@media (prefers-reduced-motion: reduce) {
-  .n2r, .n2r-flame, .n2r-dawn-glow { transition: none; animation: none; }
-}
+/* No blinking / flickering anywhere in Sleep to Rise. */
+.n2r-flame,
+.n2r-dawn-glow { animation: none; }
 
 /* ==========================================================================
    FOCUS SHIELD — uses the app's default design system (no scoped palette).
@@ -760,4 +751,72 @@ input, textarea, [contenteditable="true"] {
 
 @media (prefers-reduced-motion: reduce) {
   .shield-scanline, .shield-ripple { animation: none; display: none; }
+}
+
+/* ==========================================================================
+   SHIELD HOME — motion layer only. No new colours, fonts or tokens: every
+   effect below is built from the existing --primary / --border variables.
+   ========================================================================== */
+@keyframes shield-rise-in {
+  from { opacity: 0; transform: translateY(14px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+.shield-os > * {
+  animation: shield-rise-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.shield-os > *:nth-child(1) { animation-delay: 0.02s; }
+.shield-os > *:nth-child(2) { animation-delay: 0.08s; }
+.shield-os > *:nth-child(3) { animation-delay: 0.14s; }
+.shield-os > *:nth-child(4) { animation-delay: 0.20s; }
+.shield-os > *:nth-child(5) { animation-delay: 0.26s; }
+.shield-os > *:nth-child(6) { animation-delay: 0.32s; }
+
+/* Slow living aura behind the core rings */
+@keyframes shield-aura {
+  0%, 100% { opacity: 0.22; transform: scale(1); }
+  50%      { opacity: 0.42; transform: scale(1.05); }
+}
+.shield-aura {
+  pointer-events: none;
+  position: absolute;
+  inset: 8%;
+  border-radius: 9999px;
+  background: radial-gradient(circle, hsl(var(--primary) / 0.28), transparent 68%);
+  filter: blur(18px);
+  animation: shield-aura 6s ease-in-out infinite;
+}
+
+/* Perimeter sweep along the top edge of a panel */
+@keyframes shield-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+.shield-sweep::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(to right, transparent, hsl(var(--primary) / 0.85), transparent);
+  animation: shield-sweep 3.6s linear infinite;
+}
+
+/* Usage rails fill in from zero on mount */
+@keyframes shield-fill {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.shield-fill {
+  transform-origin: left center;
+  animation: shield-fill 0.9s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Soft press feedback for tappable rows */
+.shield-tap { transition: transform 0.16s ease, background-color 0.16s ease; }
+.shield-tap:active { transform: scale(0.985); }
+
+@media (prefers-reduced-motion: reduce) {
+  .shield-os > *,
+  .shield-aura,
+  .shield-sweep::after,
+  .shield-fill { animation: none; }
 }

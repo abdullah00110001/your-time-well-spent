@@ -1,4 +1,21 @@
 import { useState, useEffect, useRef } from 'react';
+
+/**
+ * formatCountdown — "Xd Yh Zm" / "Yh Zm" / "Zm", used wherever a gap to a
+ * future alarm is shown. FIX: previously each call site computed hours via
+ * Math.floor(diffMs / 3.6e6) with no days component, so a multi-day gap
+ * (e.g. a weekday-only alarm checked on a Friday night) rendered as
+ * something like "Ring in 60 hr. 12 min" instead of "in 2d 12h 12m".
+ */
+function formatCountdown(diffMs: number): string {
+  const totalMinutes = Math.max(0, Math.floor(diffMs / 60000));
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h ${minutes}m`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 import { readLocalAlarms, writeLocalAlarms } from '@/lib/rise/localAlarms';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -256,15 +273,22 @@ export default function RisePage() {
       }
     });
     if (closestAlarm) {
+      // NOTE: the alarm reference handed to native Sleep-to-Rise enforcement is
+      // written in exactly one place (useNightToRise, via useNextRiseAlarm).
+      // This screen must never write it too — two writers used to disagree.
       const diff = closestAlarm.date.getTime() - now.getTime();
-      const hours = Math.floor(diff / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
       // Fill the arc over the last 12 hours before the alarm.
       const WINDOW_MS = 12 * 60 * 60 * 1000;
       const progress = Math.max(0, Math.min(1, 1 - diff / WINDOW_MS));
       setNextAlarm({
         time: closestAlarm.alarm.alarm_time,
-        countdown: `Ring in ${hours} hr. ${minutes} min`,
+        // FIX: a weekday-only (or any multi-day-gap) alarm could be 60+
+        // hours away, and the old format (`${hours} hr. ${minutes} min`
+        // computed via Math.floor(diff / 3.6e6) with no days component)
+        // rendered that as "Ring in 60 hr. 12 min" instead of something
+        // readable. formatCountdown() below breaks the gap into
+        // days/hours/minutes properly.
+        countdown: `Ring in ${formatCountdown(diff)}`,
         progress,
         alarm: closestAlarm.alarm,
       });
@@ -566,3 +590,4 @@ export default function RisePage() {
     </div>
   );
 }
+

@@ -111,6 +111,7 @@ public class RiseAlarmPlugin extends Plugin {
         String body       = call.getString("body",  "Wake up!");
         String uuid       = call.getString("uuid");
         String soundUri   = call.getString("soundUri", null);
+        Integer dayOfWeek = call.getInt("dayOfWeek", -1);
 
         boolean extraLoud = Boolean.TRUE.equals(call.getBoolean("extraLoud", false));
 
@@ -127,10 +128,20 @@ public class RiseAlarmPlugin extends Plugin {
         }
 
         try {
-            RiseAlarmScheduler.scheduleAlarm(
-                getContext(), id, timeInMillis, title, body, uuid, extraLoud, soundUri
+            boolean ok = RiseAlarmScheduler.scheduleAlarm(
+                getContext(), id, timeInMillis, title, body, uuid, extraLoud, soundUri,
+                dayOfWeek == null ? -1 : dayOfWeek
             );
-            Log.d(TAG, "Scheduled id=" + id + " uuid=" + uuid + " extraLoud=" + extraLoud + " sound=" + soundUri);
+
+            // Previously this always resolved with success:true, so the user was
+            // told the alarm was set even when AlarmManager refused it.
+            if (!ok) {
+                call.reject("Android refused to schedule this alarm (id=" + id + ")");
+                return;
+            }
+
+            Log.d(TAG, "Scheduled id=" + id + " uuid=" + uuid + " extraLoud=" + extraLoud
+                    + " sound=" + soundUri + " dayOfWeek=" + dayOfWeek);
 
             JSObject ret = new JSObject();
             ret.put("success", true);

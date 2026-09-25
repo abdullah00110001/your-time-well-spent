@@ -30,12 +30,18 @@ import com.mylifeos.app.rise.state.AlarmStateManager;
  * এই Activity শুধু bridge হিসেবে কাজ করে।
  * সে React ring screen এ navigate করে দেয়।
  *
- * Dismissal protection:
- * ──────────────────────────────────────────────────────────
- * ✅ Back button block (alarm চলাকালীন)
- * ✅ onPause এ re-bring (5s delay)
- * ✅ onResume এ state check
- * ✅ Accidental finish() prevention
+ * FIX: এই Activity আগে handoff-এর পরেও back stack-এ বেঁচে থাকত ("যাতে
+ * ফিরে আসা যায়"), কিন্তু তার ফল ছিল: MainActivity সামনে আসার সাথে সাথেই
+ * এই Activity নিজেই paused হয়ে যেত — আর onPause()-এর 5s re-bring
+ * watchdog সেটাকেও "ইউজার পালাচ্ছে" ধরে নিয়ে প্রতি ৫ সেকেন্ডে
+ * goToRingScreen() আবার কল করত। এতে React-side ring screen বারবার
+ * remount হয়ে চলমান মিশনের state (solvedCount ইত্যাদি) হারিয়ে
+ * "প্রথম থেকে আবার শুরু" লুপে পড়ে যেত।
+ *
+ * এখন handoff সফল হওয়ার সাথে সাথেই finish() করে দেওয়া হয় — তাই এই
+ * Activity-র onPause() আর কখনো ভুলভাবে ফায়ার হবে না। MainActivity /
+ * AlarmSoundService-ই এখন alarm-এর পুরো lifecycle (sound, dismiss
+ * protection, ইত্যাদি) সামলায়, যেটা তারা এমনিতেও করছিল।
  * ──────────────────────────────────────────────────────────
  */
 public class RiseRingActivity extends Activity {
@@ -45,6 +51,8 @@ public class RiseRingActivity extends Activity {
     private Handler  reBringHandler  = new Handler(Looper.getMainLooper());
     private Runnable reBringRunnable;
     private boolean  missionComplete = false;
+    /** True once we've successfully handed off to MainActivity. */
+    private boolean  handedOff       = false;
 
     // ──────────────────────────────────────────
     @Override
@@ -132,7 +140,13 @@ public class RiseRingActivity extends Activity {
                             Intent.FLAG_ACTIVITY_SINGLE_TOP |
                             Intent.FLAG_ACTIVITY_CLEAR_TOP);
             startActivity(intent);
-            // finish() করি না — back stack এ থাকি যাতে return করা যায়
+            // FIX: handoff সফল — এই Activity-র কাজ শেষ। আগে finish() করা
+            // হতো না ("back stack এ থাকি যাতে return করা যায়"), কিন্তু তাতে
+            // MainActivity সামনে আসার সাথে সাথেই এই Activity paused হয়ে
+            // onPause()-এর re-bring watchdog ভুলভাবে trigger হতো প্রতি 5s
+            // পর পর — যেটা চলমান মিশনকে বারবার রিসেট করে দিচ্ছিল।
+            handedOff = true;
+            finish();
         } catch (Exception e) {
             Log.e(TAG, "goToRingScreen failed", e);
             goToMain(uuid);
@@ -177,7 +191,12 @@ public class RiseRingActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
-        // User home/back চাপলে alarm চলছে থাকলে 5s এ ফিরিয়ে আনো
+        // FIX: handoff-এর কারণে paused হলে (স্বাভাবিক, প্রতিবারই হবে) কোনো
+        // re-bring schedule করার দরকার নেই — সেটাই আগের infinite-loop বাগের
+        // কারণ ছিল। এই guard ছাড়া বাকি anti-dismiss আচরণ অপরিবর্তিত রাখা
+        // হলো (edge case: goToRingScreen exception হলে handedOff false-ই
+        // থেকে যাবে, তখন পুরনো আচরণ চলবে)।
+        if (handedOff) return;
         if (AlarmStateManager.isRinging(this) && !missionComplete) {
             Log.d(TAG, "onPause: alarm still ringing — scheduling re-bring");
             reBringRunnable = () -> {

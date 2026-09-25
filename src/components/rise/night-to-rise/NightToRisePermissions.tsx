@@ -25,13 +25,13 @@ const ROWS: Array<{ key: Key; label: string; why: string; request: () => Promise
   {
     key: 'accessibility',
     label: 'Accessibility',
-    why: 'Closes blocked apps and blocks distracting sites',
+    why: 'Closes apps outside your allowed list during lock windows',
     request: () => Shield.requestAccessibility(),
   },
   {
     key: 'overlay',
     label: 'Display over other apps',
-    why: 'Shows the block screen on top of blocked apps',
+    why: 'Shows the block screen on top of apps outside your allowed list',
     request: () => Shield.requestOverlay(),
   },
   {

@@ -16,32 +16,61 @@ public class ShieldModeManager {
         shieldPrefs = new ShieldPreferences(context);
     }
 
+    /** Packages a mode added on top of the user's own choices. */
+    private static final String KEY_MODE_ADDED = "mode_added_apps";
+
+    private static final String[] FOCUS_APPS = new String[]{
+        "com.facebook.katana",      // Facebook
+        "com.instagram.android",    // Instagram
+        "com.zhiliaoapp.musically", // TikTok
+        "com.google.android.youtube" // YouTube
+    };
+
+    private static final String[] SLEEP_EXTRA_APPS = new String[]{
+        "com.twitter.android",       // X / Twitter
+        "com.reddit.frontpage",      // Reddit
+        "com.netflix.mediaclient"    // Netflix
+    };
+
     public void activateFocusMode() {
-        Set<String> apps = new HashSet<>(shieldPrefs.getBlockedApps());
-        
-        // 🎯 ফোকাস মোডের জন্য ডেডলি ডিস্ট্রাকশন অ্যাপগুলো ব্লক লিস্টে ঢুকানো
-        apps.add("com.facebook.katana"); // Facebook
-        apps.add("com.instagram.android"); // Instagram
-        apps.add("com.zhiliaoapp.musically"); // TikTok
-        apps.add("com.google.android.youtube"); // YouTube
-        
-        shieldPrefs.setBlockedApps(apps);
+        addModeApps(FOCUS_APPS);
         shieldPrefs.setEnabled(true);
         setMode("focus");
     }
 
     public void activateSleepMode() {
-        activateFocusMode(); // ফোকাস মোডের অ্যাপগুলোও থাকবে
-        
-        Set<String> apps = new HashSet<>(shieldPrefs.getBlockedApps());
-        // 🌙 স্লিপ মোডের জন্য এক্সট্রা লেট-নাইট অ্যাপ ব্লক
-        apps.add("com.twitter.android"); // X / Twitter
-        apps.add("com.reddit.frontpage"); // Reddit
-        apps.add("com.netflix.mediaclient"); // Netflix
-        
-        shieldPrefs.setBlockedApps(apps);
+        addModeApps(FOCUS_APPS);       // ফোকাস মোডের অ্যাপগুলোও থাকবে
+        addModeApps(SLEEP_EXTRA_APPS); // 🌙 এক্সট্রা লেট-নাইট অ্যাপ
         shieldPrefs.setEnabled(true);
         setMode("sleep");
+    }
+
+    /**
+     * Adds mode packages to the block list AND remembers which ones the mode
+     * itself contributed, so deactivating a mode can undo exactly its own
+     * additions instead of nuking the user's hand-picked list.
+     */
+    private void addModeApps(String[] packages) {
+        Set<String> blocked = new HashSet<>(shieldPrefs.getBlockedApps());
+        Set<String> modeAdded = new HashSet<>(readModeAdded());
+        for (String pkg : packages) {
+            // Only track it as "mode added" when the user had not blocked it
+            // themselves — otherwise deactivating the mode would silently
+            // unblock an app the user chose to block.
+            if (blocked.add(pkg)) modeAdded.add(pkg);
+        }
+        shieldPrefs.setBlockedApps(blocked);
+        writeModeAdded(modeAdded);
+    }
+
+    private Set<String> readModeAdded() {
+        Set<String> stored = prefs.getStringSet(KEY_MODE_ADDED, null);
+        return stored == null ? new HashSet<>() : new HashSet<>(stored);
+    }
+
+    private void writeModeAdded(Set<String> values) {
+        prefs.edit().remove(KEY_MODE_ADDED).apply();
+        prefs.edit().putStringSet(KEY_MODE_ADDED, new HashSet<>(values)).apply();
     }
 
     public void activateStrictMode() {
@@ -62,8 +91,14 @@ public class ShieldModeManager {
             return; 
         }
         
-        // নরমাল মোডে ফিরে গেলে সব ব্লকড অ্যাপ ক্লিয়ার করে দেওয়া (অথবা ইউজার চাইলে ম্যানুয়ালি করতে পারে)
-        shieldPrefs.setBlockedApps(new HashSet<>()); 
+        // FIX: this used to wipe the ENTIRE block list, so every mode switch
+        // silently deleted the apps the user had picked in Block Apps — which
+        // looked exactly like "blocking stopped working". Now only the packages
+        // the mode itself added are removed; user choices survive.
+        Set<String> blocked = new HashSet<>(shieldPrefs.getBlockedApps());
+        blocked.removeAll(readModeAdded());
+        shieldPrefs.setBlockedApps(blocked);
+        writeModeAdded(new HashSet<>());
         prefs.edit().putBoolean("strict_mode", false).remove("strict_until").apply();
         setMode("normal");
     }

@@ -5,6 +5,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { ArrowLeft, Check, Upload, Type } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { Switch } from '@/components/ui/switch';
+import ShieldPlugin from '@/lib/capacitor/shieldPlugin';
 
 interface BlockScreenOption {
   id: string;
@@ -22,6 +24,39 @@ export function ShieldBlockScreen({ onBack }: ShieldBlockScreenProps) {
   const [customText, setCustomText] = useState('Stay Focused on your GOALS, your PEACE & your HAPPINESS...');
   const [customImage, setCustomImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // [SHIELD-CARD] 3-second countdown on the block card (on by default)
+  const [countdownOn, setCountdownOn] = useState(true);
+
+  const syncNative = (opts: { countdown?: boolean; theme?: string; text?: string }) => {
+    try {
+      const plugin: any = ShieldPlugin;
+      if (plugin && typeof plugin.updateBlockScreenOptions === 'function') {
+        Promise.resolve(plugin.updateBlockScreenOptions(opts)).catch(() => {});
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('shield_block_countdown');
+      const on = saved === null ? true : saved === 'true';
+      setCountdownOn(on);
+      // Push once so the native card always matches this page.
+      syncNative({
+        countdown: on,
+        theme: localStorage.getItem('shield_block_screen_theme') || undefined,
+        text: localStorage.getItem('shield_block_screen_text') || undefined,
+      });
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleCountdownToggle = (on: boolean) => {
+    setCountdownOn(on);
+    try { localStorage.setItem('shield_block_countdown', String(on)); } catch {}
+    syncNative({ countdown: on });
+  };
 
   const blockScreens: BlockScreenOption[] = [
     { id: 'default', label: 'Violet', background: 'bg-gradient-to-br from-violet-400 to-purple-600' },
@@ -48,6 +83,7 @@ export function ShieldBlockScreen({ onBack }: ShieldBlockScreenProps) {
     localStorage.setItem('shield_block_screen_theme', id);
     // Also persist to the legacy key used by the native side
     localStorage.setItem('shield_block_screen', id);
+    syncNative({ theme: id });
     // Notify native overlay if available
     try {
       window.dispatchEvent(new CustomEvent('shield:blockScreenChanged', { detail: { theme: id } }));
@@ -58,6 +94,7 @@ export function ShieldBlockScreen({ onBack }: ShieldBlockScreenProps) {
     const newText = e.target.value;
     setCustomText(newText);
     localStorage.setItem('shield_block_screen_text', newText);
+    syncNative({ text: newText });
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,6 +138,16 @@ export function ShieldBlockScreen({ onBack }: ShieldBlockScreenProps) {
             className="resize-none h-20 bg-muted/50 border-border/50 focus-visible:ring-primary/50 text-sm font-medium"
           />
           <p className="text-[10px] text-muted-foreground">This text will appear when you try to open a blocked app.</p>
+        </div>
+
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-border/50 bg-muted/30 p-3">
+          <div className="min-w-0">
+            <p className="text-sm font-bold text-foreground">3-second countdown</p>
+            <p className="text-[10px] text-muted-foreground">
+              Show a short countdown on the block card, then close it automatically.
+            </p>
+          </div>
+          <Switch checked={countdownOn} onCheckedChange={handleCountdownToggle} />
         </div>
 
         <div className="h-px bg-border/50 w-full" />

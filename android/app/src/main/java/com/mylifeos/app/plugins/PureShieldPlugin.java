@@ -238,6 +238,8 @@ public class PureShieldPlugin extends Plugin {
                 } catch (Exception e) {
                     app.put("appName", pkg);
                 }
+                String icon = encodeAppIcon(pm, ri);
+                if (icon != null) app.put("icon", icon);
                 apps.put(app);
             }
             JSObject result = new JSObject();
@@ -245,6 +247,27 @@ public class PureShieldPlugin extends Plugin {
             call.resolve(result);
         } catch (Exception e) {
             call.reject("Failed to list installed apps: " + e.getMessage());
+        }
+    }
+
+    /** Render a launcher icon into a small base64 PNG data-URL for the web UI. */
+    private String encodeAppIcon(PackageManager pm, android.content.pm.ResolveInfo ri) {
+        try {
+            android.graphics.drawable.Drawable d = ri.loadIcon(pm);
+            if (d == null) return null;
+            int size = 96;
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                size, size, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+            d.setBounds(0, 0, size, size);
+            d.draw(canvas);
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+            bmp.recycle();
+            return "data:image/png;base64,"
+                + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP);
+        } catch (Throwable t) {
+            return null;
         }
     }
 

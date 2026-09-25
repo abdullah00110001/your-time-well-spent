@@ -61,7 +61,7 @@ export function NightToRiseInsights({ config, update }: Props) {
                 <div
                   className={cn(
                     'h-8 w-full rounded-md',
-                    d.state === 'clean' ? 'bg-emerald-500/70'
+                    d.state === 'clean' ? 'bg-success/70'
                       : d.state === 'broken' ? 'bg-destructive/60'
                       : 'bg-muted',
                   )}
@@ -85,7 +85,7 @@ export function NightToRiseInsights({ config, update }: Props) {
               title={`${d.date}: ${d.state}`}
               className={cn(
                 'h-3.5 w-3.5 rounded-sm',
-                d.state === 'clean' ? 'bg-emerald-500/70'
+                d.state === 'clean' ? 'bg-success/70'
                   : d.state === 'broken' ? 'bg-destructive/60'
                   : 'bg-muted',
               )}
@@ -110,7 +110,7 @@ export function NightToRiseInsights({ config, update }: Props) {
                 </span>
                 <span className={cn(
                   'rounded-full px-2 py-0.5 text-[11px] font-semibold',
-                  r.broken ? 'bg-destructive/10 text-destructive' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                  r.broken ? 'bg-destructive/10 text-destructive' : 'bg-success/10 text-success',
                 )}>
                   {r.broken ? 'Broken' : 'Protected'}
                 </span>
@@ -143,10 +143,10 @@ function Stat({ icon, label, value, suffix, tone }: {
   tone: 'amber' | 'violet' | 'emerald' | 'sky';
 }) {
   const tones: Record<string, string> = {
-    amber: 'text-amber-500 bg-amber-500/10',
-    violet: 'text-violet-500 bg-violet-500/10',
-    emerald: 'text-emerald-500 bg-emerald-500/10',
-    sky: 'text-sky-500 bg-sky-500/10',
+    amber: 'text-warning bg-warning/10',
+    violet: 'text-primary bg-primary/10',
+    emerald: 'text-success bg-success/10',
+    sky: 'text-accent-foreground bg-accent',
   };
   return (
     <div className="rounded-lg border border-border p-3">

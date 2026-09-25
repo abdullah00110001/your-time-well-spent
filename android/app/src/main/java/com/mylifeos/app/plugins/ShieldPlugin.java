@@ -172,6 +172,7 @@ public class ShieldPlugin extends Plugin {
                 apps.add(appsArray.getString(i));
             }
             preferences.setBlockedApps(apps);
+            com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(getContext());
             call.resolve();
         } catch (Exception e) {
             call.reject("Failed to update block list", e);
@@ -216,9 +217,45 @@ public class ShieldPlugin extends Plugin {
             Set<String> set = new HashSet<>();
             for (int i = 0; i < arr.length(); i++) set.add(arr.getString(i));
             preferences.setBlockedKeywords(set);
+            com.mylifeos.app.shield.ShieldAccessibilityService.refreshContentConfiguration();
             call.resolve();
         } catch (Exception e) {
             call.reject("Failed to update keywords", e);
+        }
+    }
+
+    // ==========================================
+    // 💬 TELEGRAM GUARD
+    // ==========================================
+    private static final String[] TELEGRAM_OPTION_KEYS = new String[]{
+        "enabled", "blockChats", "blockSearch", "blockInviteLinks",
+        "blockAllInvites", "blockMedia", "blockAllMedia"
+    };
+
+    @PluginMethod
+    public void getTelegramGuard(PluginCall call) {
+        JSObject ret = new JSObject();
+        for (String key : TELEGRAM_OPTION_KEYS) {
+            ret.put(key, preferences.getTelegramGuardOption(key));
+        }
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void setTelegramGuard(PluginCall call) {
+        try {
+            for (String key : TELEGRAM_OPTION_KEYS) {
+                Boolean value = call.getBoolean(key);
+                if (value != null) preferences.setTelegramGuardOption(key, value);
+            }
+            com.mylifeos.app.shield.ShieldAccessibilityService.refreshContentConfiguration();
+            JSObject ret = new JSObject();
+            for (String key : TELEGRAM_OPTION_KEYS) {
+                ret.put(key, preferences.getTelegramGuardOption(key));
+            }
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to update Telegram Guard settings", e);
         }
     }
 
@@ -323,6 +360,33 @@ public class ShieldPlugin extends Plugin {
         JSObject ret = new JSObject();
         ret.put("style", preferences.getAdultBlockScreenStyle());
         ret.put("customMessage", preferences.getAdultBlockCustomMessage());
+        call.resolve(ret);
+    }
+
+    // [SHIELD-CARD] Block Screen Style page -> native block card
+    @PluginMethod
+    public void updateBlockScreenOptions(PluginCall call) {
+        try {
+            Boolean countdown = call.getBoolean("countdown");
+            if (countdown != null) preferences.setBlockCountdownEnabled(countdown);
+            String theme = call.getString("theme");
+            if (theme != null) preferences.setBlockScreenTheme(theme);
+            String text = call.getString("text");
+            if (text != null) preferences.setBlockScreenText(text);
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void getBlockScreenOptions(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("countdown", preferences.isBlockCountdownEnabled());
+        ret.put("theme", preferences.getBlockScreenTheme());
+        ret.put("text", preferences.getBlockScreenText());
         call.resolve(ret);
     }
 
@@ -476,6 +540,9 @@ public class ShieldPlugin extends Plugin {
             List<android.content.pm.ResolveInfo> resolved =
                 pm.queryIntentActivities(launcherIntent, 0);
 
+            // Icons are heavy — allow the JS side to opt out (default: include).
+            boolean withIcons = call.getBoolean("icons", Boolean.TRUE);
+
             JSArray apps = new JSArray();
             String myPkg = getContext().getPackageName();
             for (android.content.pm.ResolveInfo ri : resolved) {
@@ -492,6 +559,10 @@ public class ShieldPlugin extends Plugin {
                     app.put("appName", pkg);
                     app.put("isSystem", false);
                 }
+                if (withIcons) {
+                    String icon = encodeAppIcon(pm, ri);
+                    if (icon != null) app.put("icon", icon);
+                }
                 apps.put(app);
             }
 
@@ -502,6 +573,31 @@ public class ShieldPlugin extends Plugin {
             call.reject("Failed to list installed apps", e);
         }
     }
+
+    /** Render a launcher icon into a small base64 PNG data-URL for the web UI. */
+    private String encodeAppIcon(PackageManager pm, android.content.pm.ResolveInfo ri) {
+        try {
+            android.graphics.drawable.Drawable d = ri.loadIcon(pm);
+            if (d == null) return null;
+
+            int size = 96; // px — enough for a 40dp list icon on xxhdpi
+            android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
+                size, size, android.graphics.Bitmap.Config.ARGB_8888);
+            android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
+            d.setBounds(0, 0, size, size);
+            d.draw(canvas);
+
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
+            bmp.recycle();
+            return "data:image/png;base64,"
+                + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+
 
     @PluginMethod
     public void getBlockStats(PluginCall call) {

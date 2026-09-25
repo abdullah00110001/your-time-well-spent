@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import type { InstalledAppItem } from './types';
 import { RECOMMENDED_PACKAGES } from './storage';
+import { AppIconImage } from '@/components/shield/AppIconImage';
 
 interface AppSelectorListProps {
   apps: InstalledAppItem[];
@@ -150,9 +151,13 @@ export function AppSelectorList({
                   checked && 'bg-primary/5',
                 )}
               >
-                <div className="h-10 w-10 rounded-full bg-primary/15 flex items-center justify-center text-xs font-semibold shrink-0">
-                  {initials(app.appName)}
-                </div>
+                {app.icon ? (
+                  <AppIconImage icon={app.icon} appName={app.appName} className="rounded-full" />
+                ) : (
+                  <div className="h-10 w-10 rounded-full bg-primary/15 flex items-center justify-center text-xs font-semibold shrink-0">
+                    {initials(app.appName)}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium truncate flex items-center gap-1.5">
                     {app.appName}

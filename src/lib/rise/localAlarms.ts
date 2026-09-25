@@ -50,4 +50,8 @@ if (typeof window !== 'undefined') {
   window.addEventListener('storage', (e) => {
     if (e.key === KEY || e.key === null) invalidateLocalAlarms();
   });
+  // Section 0.1 — the `storage` event never fires in the tab that wrote the
+  // value, so a same-tab write (the alarm editor) used to leave this cache
+  // stale and the newly saved alarm looked like it had not been saved.
+  window.addEventListener('localAlarmsUpdated', invalidateLocalAlarms);
 }

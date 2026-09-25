@@ -57,6 +57,7 @@ import MonthlyHighlights from "./pages/MonthlyHighlights";
 import FutureLetter from "./pages/FutureLetter";
 import Analytics from "./pages/Analytics";
 import Settings from "./pages/Settings";
+import ActivityLog from "./pages/ActivityLog";
 import YearEndWrapped from "./pages/YearEndWrapped";
 import DataExport from "./pages/DataExport";
 import DailyInput from "./pages/DailyInput";
@@ -179,6 +180,8 @@ const AppContent = () => {
         <Route path="/future-letter" element={<ProtectedRoute><FutureLetter /></ProtectedRoute>} />
         <Route path="/analytics" element={<ProtectedRoute><Analytics /></ProtectedRoute>} />
         <Route path="/settings" element={<ProtectedRoute><Settings /></ProtectedRoute>} />
+        <Route path="/activity-log" element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} />
+        <Route path="/activity-log/:source" element={<ProtectedRoute><ActivityLog /></ProtectedRoute>} />
         <Route path="/wrapped" element={<ProtectedRoute><YearEndWrapped /></ProtectedRoute>} />
         <Route path="/export" element={<ProtectedRoute><DataExport /></ProtectedRoute>} />
         <Route path="/daily-input" element={<ProtectedRoute><DailyInput /></ProtectedRoute>} />

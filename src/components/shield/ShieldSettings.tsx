@@ -7,7 +7,7 @@ import {
   KeyRound, Timer, Lock, Vibrate, Volume2, Eye,
   Trash2, Database, RefreshCw, Zap, BellRing, 
   ShieldCheck, CheckCircle2, XCircle, Bell, ChevronRight,
-  ShieldAlert, Activity
+  ShieldAlert, Activity, MessageCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { openAccessibilitySettings, openDeviceAdminSettings, openUsageAccessSettings } from '@/utils/permissions';
@@ -169,6 +169,15 @@ export function ShieldSettings({ settings, onSettingChange, onNavigate }: Shield
       iconColor: permissionStatus.accessibility ? 'text-green-500' : 'text-rose-500',
       iconBg: permissionStatus.accessibility ? 'bg-green-500/10' : 'bg-rose-500/10',
       showGreenDot: permissionStatus.accessibility,
+    },
+    {
+      icon: MessageCircle,
+      title: 'Telegram Guard',
+      description: 'Block 18+ chats, search, invite links and media in Telegram',
+      hasArrow: true,
+      onClick: () => onNavigate('telegram-guard'),
+      iconColor: 'text-sky-500',
+      iconBg: 'bg-sky-500/10',
     },
     {
       icon: Activity,

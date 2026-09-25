@@ -8,6 +8,7 @@ import {
   cancelNativeAlarmShots,
   canScheduleExactAlarms,
   ensureNativeAlarmChannel,
+  uuidToNumericId as bridgeUuidToNumericId,
 } from './riseAlarmBridge';
 
 export interface AlarmConfig {
@@ -33,14 +34,13 @@ const RISE_ALARM_CHANNEL_ID = 'rise_alarm_native_v2';
 
 let listenersRegistered = false;
 
-export function uuidToNumericId(value: string): number {
-  let hash = 0;
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash) % 100000;
-}
+/**
+ * Section 0.1 — MUST stay identical to the bridge's hashing.
+ * It previously used `% 100000` here and `% 90000` in riseAlarmBridge, so
+ * cancelAlarmByUuid() computed different ids than scheduleNativeAlarmShots()
+ * and edited alarms left stale OS-level shots behind.
+ */
+export const uuidToNumericId = bridgeUuidToNumericId;
 
 export const initializeAlarmChannel = async (): Promise<void> => {
   if (!Capacitor.isNativePlatform()) return;

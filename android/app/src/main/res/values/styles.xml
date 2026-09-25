@@ -19,4 +19,27 @@
     <style name="AppTheme.NoActionBarLaunch" parent="AppTheme.NoActionBar">
         <item name="android:background">@drawable/splash</item>
     </style>
+
+    <!-- Alarm launch theme: opaque dark/warm window so a full-screen alarm
+         cold start matches the ring screen instead of flashing white. -->
+    <style name="AppTheme.AlarmLaunch" parent="AppTheme.NoActionBar">
+        <item name="android:background">@drawable/alarm_launch_background</item>
+        <item name="android:windowBackground">@drawable/alarm_launch_background</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:windowDisablePreview">false</item>
+    </style>
+
+    <!-- Sleep to Rise block screen: the window itself is already painted with
+         the night gradient, so the lock appears instantly with no white flash
+         and no window animation between the overlay and the activity. -->
+    <style name="AppTheme.SleepToRiseBlock" parent="@android:style/Theme.Material.NoActionBar.Fullscreen">
+        <item name="android:windowBackground">@drawable/n2r_bg_sleep</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowShowWallpaper">false</item>
+        <item name="android:windowDisablePreview">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:statusBarColor">#00000000</item>
+        <item name="android:navigationBarColor">#00000000</item>
+    </style>
 </resources>

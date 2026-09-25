@@ -23,12 +23,17 @@ public final class AlarmSettingsPreferences {
     public static final String K_VIBRATE         = "alarm.vibrate";        // true/false
     public static final String K_SNOOZE_MINUTES  = "alarm.snoozeMinutes";  // 1/3/5/10/15
     public static final String K_CRESCENDO       = "alarm.crescendo";      // true/false
+    public static final String K_RAMP_SECONDS    = "alarm.volumeRampSeconds"; // 10..180
 
     // Sensible defaults — match RiseSettings.tsx DEFAULTS
     public static final int     DEFAULT_VOLUME_PCT     = 100;
     public static final boolean DEFAULT_VIBRATE        = true;
     public static final int     DEFAULT_SNOOZE_MINUTES = 5;
-    public static final boolean DEFAULT_CRESCENDO      = false;
+    public static final boolean DEFAULT_CRESCENDO      = true;
+    /** Section 0.3 — gradual volume ramp duration (seconds). */
+    public static final int     DEFAULT_RAMP_SECONDS   = 45;
+    /** Ramp starts here (18% of the target volume) instead of silence/full blast. */
+    public static final float   RAMP_START_FRACTION    = 0.18f;
 
     private static SharedPreferences prefs(Context ctx) {
         return ctx.getApplicationContext()
@@ -77,6 +82,20 @@ public final class AlarmSettingsPreferences {
             return (n > 0 && n <= 60) ? n : DEFAULT_SNOOZE_MINUTES;
         } catch (NumberFormatException e) {
             return DEFAULT_SNOOZE_MINUTES;
+        }
+    }
+
+    /** Section 0.3 — configurable ramp duration in seconds (default 45, clamped 10..180). */
+    public static int getRampSeconds(Context ctx) {
+        String v = getStr(ctx, K_RAMP_SECONDS);
+        if (v == null) return DEFAULT_RAMP_SECONDS;
+        try {
+            int n = Integer.parseInt(v.trim());
+            if (n < 10) return 10;
+            if (n > 180) return 180;
+            return n;
+        } catch (NumberFormatException e) {
+            return DEFAULT_RAMP_SECONDS;
         }
     }
 

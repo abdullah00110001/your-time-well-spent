@@ -123,7 +123,7 @@ public class PureShieldService extends Service {
 
     // ✅ Fix 2 — Body extend: face নিচে কতটুকু extend করবো
     // 0.5 = face height এর ৫০% নিচে যাবে (neck + upper chest cover)
-    private static final float BODY_EXTEND_FRAC = 0.55f;
+    private static final float BODY_EXTEND_FRAC = 0.75f;
 
     // ─────────────────────────────────────────────────────────────────────────
     // Lifecycle
@@ -789,7 +789,14 @@ public class PureShieldService extends Service {
     }
 
     private List<DetectedFace> detectFaces(Bitmap src, int inputW, int inputH) {
-        if (faceDetector == null) return detectFacesWithMlKit(src, "tflite-null");
+        // ML Kit primary — Google-maintained, no fixed-square-resize distortion,
+        // hardware-optimized. Falls back to custom TFLite BlazeFace only when
+        // ML Kit is unavailable (e.g. no Google Play Services) or finds nothing.
+        if (ensureMlKitFaceDetector()) {
+            List<DetectedFace> mlKitFaces = detectFacesWithMlKit(src, "primary");
+            if (!mlKitFaces.isEmpty() || faceDetector == null) return mlKitFaces;
+        }
+        if (faceDetector == null) return Collections.emptyList();
 
         Bitmap resized = Bitmap.createScaledBitmap(src, inputW, inputH, false);
         float[][][][] input = new float[1][inputH][inputW][3];

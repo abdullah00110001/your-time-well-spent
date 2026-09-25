@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { isNative, isAndroid } from '@/lib/capacitor/platform';
 import Shield from '@/lib/capacitor/shieldPlugin';
 import { lightImpact, successNotification } from '@/lib/capacitor/nativeHaptics';
+import { AppIconImage } from '@/components/shield/AppIconImage';
 import { AllowedApp, SUGGESTED_BLOCK_APPS, ALWAYS_ALLOWED_IDS } from './types';
 
 const FALLBACK_APPS: AllowedApp[] = [
@@ -67,24 +68,26 @@ export function InstalledAppPicker({
       setNativeUnavailable(false);
       try {
         if (isNative && isAndroid) {
-          const res = await Shield.getInstalledApps();
+          const res = await Shield.getInstalledApps({ icons: false });
           const list = (res?.apps ?? [])
             .filter((a) => a?.packageName)
-            .map((a) => ({ id: a.packageName, name: a.appName || a.packageName }));
+            .map((a) => ({ id: a.packageName, name: a.appName || a.packageName, icon: a.icon }));
           if (!cancelled && list.length > 0) {
             setApps(dedupe(list));
             return;
           }
         }
         if (!cancelled) {
-          setNativeUnavailable(isNative);
-          setApps(dedupe(FALLBACK_APPS));
+          // On a real device we never show a curated/dummy list — an empty
+          // result means the OS query failed or permission is missing.
+          setNativeUnavailable(isNative && isAndroid);
+          setApps(isNative && isAndroid ? [] : dedupe(FALLBACK_APPS));
         }
       } catch (e) {
         console.warn('[InstalledAppPicker] getInstalledApps failed', e);
         if (!cancelled) {
           setNativeUnavailable(true);
-          setApps(dedupe(FALLBACK_APPS));
+          setApps(isNative && isAndroid ? [] : dedupe(FALLBACK_APPS));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -100,7 +103,7 @@ export function InstalledAppPicker({
     const known = new Set(apps.map((a) => a.id));
     const extras = selected
       .filter((id) => !known.has(id))
-      .map((id) => ({ id, name: id }));
+      .map((id) => ({ id, name: id, icon: undefined as string | undefined }));
     return [...extras, ...apps];
   }, [apps, selected]);
 
@@ -110,12 +113,12 @@ export function InstalledAppPicker({
       ? merged.filter((a) => a.name.toLowerCase().includes(q) || a.id.toLowerCase().includes(q))
       : merged;
     return [...list].sort((a, b) => {
-      const as = picked.has(a.id) ? 0 : 1;
-      const bs = picked.has(b.id) ? 0 : 1;
+      const as = 0;
+      const bs = 0;
       if (as !== bs) return as - bs;
       return a.name.localeCompare(b.name);
     });
-  }, [merged, query, picked]);
+  }, [merged, query]);
 
   const toggle = (id: string) => {
     if (lockedIds.includes(id)) {
@@ -206,9 +209,7 @@ export function InstalledAppPicker({
                       on ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted/50',
                     )}
                   >
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-muted">
-                      <Smartphone className="h-4 w-4 text-muted-foreground" />
-                    </div>
+                    <AppIconImage icon={app.icon} appName={app.name} className="h-9 w-9 rounded-lg" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">{app.name}</p>
                       <p className="truncate text-[11px] text-muted-foreground">{app.id}</p>
