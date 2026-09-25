@@ -12,11 +12,30 @@ interface BlockAppsPageProps {
   onBack: () => void;
 }
 
-const STORAGE_KEY = 'shield_blocked_apps_v2';
+const STORAGE_KEY = 'shield_allowed_apps_v2';
+const LEGACY_STORAGE_KEY = 'shield_blocked_apps_v2';
+
+const isProtectedSystemPackage = (pkg: string) => {
+  const normalized = pkg?.trim().toLowerCase();
+  if (!normalized) return true;
+
+  return normalized === 'android' || [
+    'com.android.',
+    'com.google.android.',
+    'com.sec.android.',
+    'com.miui.',
+    'com.oneplus.',
+    'com.samsung.',
+    'com.huawei.',
+  ].some(prefix => normalized.startsWith(prefix));
+};
+
+const sanitizePackages = (packages: string[]) =>
+  Array.from(new Set((packages || []).filter(pkg => pkg && !isProtectedSystemPackage(pkg))));
 
 export function BlockAppsPage({ onBack }: BlockAppsPageProps) {
   const [apps, setApps] = useState<InstalledApp[]>([]);
-  const [blocked, setBlocked] = useState<Set<string>>(new Set());
+  const [allowed, setAllowed] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -24,72 +43,106 @@ export function BlockAppsPage({ onBack }: BlockAppsPageProps) {
     const load = async () => {
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
-        const initialBlocked: string[] = stored ? JSON.parse(stored) : [];
-        setBlocked(new Set(initialBlocked));
+        const initialAllowed = sanitizePackages(stored ? JSON.parse(stored) : []);
+        setAllowed(new Set(initialAllowed));
 
         try {
-          const native = await ShieldPlugin.getBlockedApps();
-          if (native.apps?.length) {
-            setBlocked(new Set(native.apps));
+          const native = await ShieldPlugin.getAllowedApps();
+          const nextAllowed = sanitizePackages(native.apps || []);
+          setAllowed(new Set(nextAllowed));
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(nextAllowed));
+        } catch {
+          try {
+            const legacy = await ShieldPlugin.getBlockedApps();
+            const legacyAllowed = sanitizePackages(legacy.apps || []);
+            if (legacyAllowed.length > 0) {
+              setAllowed(new Set(legacyAllowed));
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(legacyAllowed));
+            }
+          } catch {
+            // old block-list state is ignored; allowlist is the source of truth
           }
-        } catch {/* fall through */}
+        }
 
         try {
           const installed = await ShieldPlugin.getInstalledApps();
-          setApps(installed.apps || []);
+          setApps((installed.apps || []).filter(app => !isProtectedSystemPackage(app.packageName)));
         } catch (e) {
           console.error('getInstalledApps failed', e);
           const stats = await ShieldPlugin.getScreenTimeStats();
-          setApps((stats.apps || []).map(a => ({
-            packageName: a.packageName,
-            appName: a.appName,
-            isSystem: false,
-          })));
+          setApps((stats.apps || [])
+            .map(app => ({ packageName: app.packageName, appName: app.appName, isSystem: false }))
+            .filter(app => !isProtectedSystemPackage(app.packageName)));
+        }
+
+        // Migration: allowlist wins, but stale blocked list is not reused to block apps.
+        const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (legacy) {
+          try {
+            const parsed = JSON.parse(legacy);
+            if (Array.isArray(parsed) && parsed.length > 0 && initialAllowed.length === 0) {
+              localStorage.removeItem(LEGACY_STORAGE_KEY);
+            }
+          } catch {}
         }
       } finally {
         setLoading(false);
       }
     };
+
     load();
   }, []);
 
   const sortedFiltered = useMemo(() => {
     const lower = search.toLowerCase();
     return apps
-      .filter(a =>
-        a.appName.toLowerCase().includes(lower) ||
-        a.packageName.toLowerCase().includes(lower)
+      .filter(app =>
+        app.appName.toLowerCase().includes(lower) ||
+        app.packageName.toLowerCase().includes(lower)
       )
       .sort((a, b) => {
-        const aB = blocked.has(a.packageName) ? 0 : 1;
-        const bB = blocked.has(b.packageName) ? 0 : 1;
-        if (aB !== bB) return aB - bB;
+        const aState = allowed.has(a.packageName) ? 0 : 1;
+        const bState = allowed.has(b.packageName) ? 0 : 1;
+        if (aState !== bState) return aState - bState;
         return a.appName.localeCompare(b.appName);
       });
-  }, [apps, search, blocked]);
+  }, [apps, search, allowed]);
 
   const persist = async (next: Set<string>) => {
-    setBlocked(new Set(next));
-    const list = Array.from(next);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+    const safeList = sanitizePackages(Array.from(next));
+    const safeSet = new Set(safeList);
+    setAllowed(safeSet);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeList));
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+
     try {
-      await ShieldPlugin.blockApps({ apps: list });
+      await ShieldPlugin.setAllowedApps({ apps: safeList });
     } catch (e) {
-      console.error('blockApps failed', e);
-      toast.error('Could not save to Shield service');
+      console.error('setAllowedApps failed', e);
+      try {
+        await ShieldPlugin.blockApps({ apps: safeList });
+      } catch (nativeError) {
+        console.error('blockApps fallback failed', nativeError);
+      }
+      toast.error('Could not save allowlist to Shield service');
     }
   };
 
-  const toggle = (pkg: string) => {
-    const next = new Set(blocked);
-    if (next.has(pkg)) {
-      next.delete(pkg);
-      toast.info('Unblocked');
-    } else {
-      next.add(pkg);
-      toast.success('Blocked');
+  const toggle = (packageName: string) => {
+    if (isProtectedSystemPackage(packageName)) {
+      toast.info('System apps stay allowed and cannot be removed from the allowlist.');
+      return;
     }
-    persist(next);
+
+    const next = new Set(allowed);
+    if (next.has(packageName)) {
+      next.delete(packageName);
+      toast.info('Removed from allowed apps');
+    } else {
+      next.add(packageName);
+      toast.success('Added to allowed apps');
+    }
+    void persist(next);
   };
 
   return (
@@ -100,9 +153,9 @@ export function BlockAppsPage({ onBack }: BlockAppsPageProps) {
             <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="flex-1">
-            <h1 className="text-lg font-bold">Block Apps</h1>
+            <h1 className="text-lg font-bold">Allowed Apps</h1>
             <p className="text-xs text-muted-foreground">
-              {blocked.size} app{blocked.size !== 1 && 's'} blocked
+              {allowed.size} app{allowed.size !== 1 && 's'} allowed
             </p>
           </div>
         </div>
@@ -134,37 +187,31 @@ export function BlockAppsPage({ onBack }: BlockAppsPageProps) {
             </Card>
           ) : (
             sortedFiltered.map(app => {
-              const isBlocked = blocked.has(app.packageName);
+              const isAllowed = allowed.has(app.packageName);
               return (
                 <Card
                   key={app.packageName}
-                  className={isBlocked ? 'border-rose-500/50 bg-rose-500/5' : ''}
+                  className={isAllowed ? 'border-emerald-500/50 bg-emerald-500/5' : ''}
                 >
                   <CardContent className="p-3 flex items-center justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="relative shrink-0">
-                        <AppIconImage
-                          icon={app.icon}
-                          appName={app.appName}
-                        />
-
-                        {isBlocked && (
-                          <div className="absolute -top-1 -right-1 bg-rose-500 rounded-full p-0.5">
+                        <AppIconImage icon={app.icon} appName={app.appName} />
+                        {isAllowed && (
+                          <div className="absolute -top-1 -right-1 bg-emerald-500 rounded-full p-0.5">
                             <CheckCircle2 className="h-3 w-3 text-white" />
                           </div>
                         )}
                       </div>
                       <div className="min-w-0">
                         <p className="font-medium text-sm truncate">{app.appName}</p>
-                        <p className="text-[10px] text-muted-foreground truncate">
-                          {app.packageName}
-                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">{app.packageName}</p>
                       </div>
                     </div>
                     <Switch
-                      checked={isBlocked}
+                      checked={isAllowed}
                       onCheckedChange={() => toggle(app.packageName)}
-                      className="data-[state=checked]:bg-rose-500"
+                      className="data-[state=checked]:bg-emerald-500"
                     />
                   </CardContent>
                 </Card>
