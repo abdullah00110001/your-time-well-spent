@@ -9,17 +9,18 @@ export interface InstalledApp {
 }
 
 export interface ShieldPluginInterface {
-  // ১. বেসিক কন্ট্রোল
   enable(): Promise<void>;
   disable(): Promise<void>;
   isEnabled(): Promise<{ enabled: boolean }>;
 
-  // ২. অ্যাপ ব্লকিং
-  // Native method names are exact — the old `setBlockedApps?` / `setBlockedSites?` /
-  // `setBlockedKeywords?` optional aliases did not exist in ShieldPlugin.java, so
-  // every call through them silently no-opped.
+  // Allowlist-based app control (preferred)
+  getAllowedApps(): Promise<{ apps: string[] }>;
+  setAllowedApps(options: { apps: string[] }): Promise<void>;
+
+  // Back-compat aliases for older JS code paths
   blockApps(options: { apps: string[] }): Promise<void>;
   getBlockedApps(): Promise<{ apps: string[] }>;
+
   blockSites(options: { sites: string[] }): Promise<void>;
   getBlockedSites(): Promise<{ sites: string[] }>;
   blockKeywords(options: { keywords: string[] }): Promise<void>;
@@ -27,14 +28,12 @@ export interface ShieldPluginInterface {
   getInstalledApps(options?: { icons?: boolean }): Promise<{ apps: InstalledApp[] }>;
   getBlockStats(): Promise<{ blockedAttemptsToday: number }>;
 
-  // ৩. মোড ম্যানেজমেন্ট
   activateFocusMode(): Promise<void>;
   activateSleepMode(): Promise<void>;
   activateStrictMode(): Promise<void>;
   deactivateMode(): Promise<void>;
   getCurrentMode(): Promise<{ mode: string; strict: boolean }>;
 
-  // ৪. স্ট্যাটাস ও অ্যানালিটিক্স
   getScreenTimeStats(): Promise<{
     totalMinutes: number;
     totalLaunches: number;
@@ -48,7 +47,6 @@ export interface ShieldPluginInterface {
     error?: string;
   }>;
 
-  // ৫. পারমিশন হ্যান্ডলিং
   checkPermissions(): Promise<{
     accessibility: boolean;
     usageStats: boolean;
@@ -60,10 +58,8 @@ export interface ShieldPluginInterface {
   requestUsageStats(): Promise<void>;
   requestOverlay(): Promise<void>;
   requestBattery(): Promise<void>;
-  // ✅ NEW: Device Admin request
   requestDeviceAdmin(): Promise<void>;
 
-  // 🛡️ অ্যাডভান্সড প্রোটেকশন
   toggleAdultFilter(options: { enable: boolean }): Promise<void>;
   updateHardcoreSettings(options: { key: string; value: boolean }): Promise<void>;
   setEscalationBase(options: { minutes: number }): Promise<{ success: boolean }>;
@@ -72,13 +68,11 @@ export interface ShieldPluginInterface {
   clearHistory(): Promise<{ success: boolean }>;
   updateNotificationSettings(options: { key: string; value: boolean }): Promise<void>;
 
-  // ✅ NEW: Adult Filter Screen style save
   updateAdultFilterScreen(options: {
     style: string;
     customMessage: string;
   }): Promise<{ success: boolean }>;
   getAdultFilterScreen(): Promise<{ style: string; customMessage: string }>;
-  // [SHIELD-CARD] Block Screen Style -> native block card
   updateBlockScreenOptions(options: {
     countdown?: boolean;
     theme?: string;
@@ -86,7 +80,6 @@ export interface ShieldPluginInterface {
   }): Promise<{ success: boolean }>;
   getBlockScreenOptions(): Promise<{ countdown: boolean; theme: string; text: string }>;
 
-  // 🔑 Emergency Bypass & Light Orb Timer
   setEmergencyPin(options: { pin: string }): Promise<void>;
   triggerEmergencyBypass(options: { pin: string }): Promise<{ success: boolean }>;
   toggleFloatingTimer(options: { enable: boolean }): Promise<void>;
@@ -103,7 +96,6 @@ export interface ShieldPluginInterface {
     theme?: string;
   }): Promise<void>;
 
-  // ✨ Focus session (drives the native Light Orb; survives backgrounding)
   startFocusSession(options: { minutes: number }): Promise<FocusSessionState>;
   pauseFocusSession(): Promise<FocusSessionState>;
   resumeFocusSession(): Promise<FocusSessionState>;
@@ -111,25 +103,21 @@ export interface ShieldPluginInterface {
   stopFocusSession(): Promise<FocusSessionState>;
   getFocusSession(): Promise<FocusSessionState>;
 
-  // ⏱️ Daily app limits (enforced natively by ShieldTimerManager)
   setAppLimit(options: { packageName: string; minutes: number }): Promise<{ success: boolean }>;
   getAppLimits(): Promise<{
     limits: Record<string, number>;
     usedMinutes: Record<string, number>;
   }>;
 
-  // 🔒 App Lock
   getAppLockStatus(): Promise<AppLockStatus>;
   setAppLock(options: { enabled: boolean; pin?: string; biometric?: boolean }): Promise<{ success: boolean }>;
   verifyAppLockPin(options: { pin: string }): Promise<{ valid: boolean }>;
   authenticateBiometric(): Promise<{ authenticated: boolean }>;
 
-  // 🌅 Day boundary / notification prefs
   setDayBoundary(options: { startHour?: number; autoReset?: boolean }): Promise<DayBoundary>;
   getDayBoundary(): Promise<DayBoundary>;
   getNotificationSettings(): Promise<{ vibrate: boolean; sound: boolean; lowTimeAlert: boolean }>;
 
-  // 💬 Telegram Guard (offline, accessibility-based)
   getTelegramGuard(): Promise<TelegramGuardSettings>;
   setTelegramGuard(options: Partial<TelegramGuardSettings>): Promise<TelegramGuardSettings>;
 }
@@ -172,7 +160,6 @@ export interface DayBoundary {
   startHour: number;
   autoReset: boolean;
 }
-
 
 const Shield = registerPlugin<ShieldPluginInterface>('Shield');
 export default Shield;
