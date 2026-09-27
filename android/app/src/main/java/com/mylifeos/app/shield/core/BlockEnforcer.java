@@ -9,8 +9,6 @@ import android.content.Intent;
 import android.os.SystemClock;
 import android.util.Log;
 
-import com.mylifeos.app.nighttorise.NightToRiseBlockActivity;
-import com.mylifeos.app.nighttorise.NightToRiseManager;
 import com.mylifeos.app.shield.ShieldBlockActivity;
 import com.mylifeos.app.shield.ShieldPreferences;
 
@@ -88,7 +86,7 @@ public final class BlockEnforcer {
     public static boolean isNeverBlockable(Context ctx, String pkg) {
         if (pkg == null || pkg.isEmpty()) return true;
         if (pkg.equals(ctx.getApplicationContext().getPackageName())) return true;
-        if (pkg.contains("ShieldBlock") || pkg.contains("NightToRise")) return true;
+        if (pkg.contains("ShieldBlock")) return true;
         return false;
     }
 
@@ -104,47 +102,15 @@ public final class BlockEnforcer {
 
     public static final class Result {
         public final boolean blocked;
-        public final boolean sleepToRise;
-        public Result(boolean blocked, boolean sleepToRise) {
-            this.blocked = blocked; this.sleepToRise = sleepToRise;
+        public Result(boolean blocked) {
+            this.blocked = blocked;
         }
-        static final Result NONE = new Result(false, false);
+        static final Result NONE = new Result(false);
     }
 
     public static Result enforce(Context ctx, String pkg, Runnable leaveApp) {
         if (isNeverBlockable(ctx, pkg) || isProtectedSystemPackage(pkg)) return Result.NONE;
 
-        try {
-            NightToRiseManager n2r = new NightToRiseManager(ctx);
-            NightToRiseManager.Decision d = n2r.decide(System.currentTimeMillis(), pkg);
-            if (d.shouldBlock) {
-                if (allowScreen(pkg)) {
-                    n2r.prefs().recordBlockedAttempt(pkg,
-                        d.phase == NightToRiseManager.Phase.RISE_LOCK ? "rise" : "sleep");
-                    Intent i = new Intent(ctx, NightToRiseBlockActivity.class);
-                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                        | Intent.FLAG_ACTIVITY_SINGLE_TOP
-                        | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
-                        | Intent.FLAG_ACTIVITY_NO_ANIMATION);
-                    i.putExtra(NightToRiseBlockActivity.EXTRA_MESSAGE, d.message);
-                    i.putExtra(NightToRiseBlockActivity.EXTRA_END_MS, d.endTimeMs);
-                    i.putExtra(NightToRiseBlockActivity.EXTRA_STRICT, n2r.prefs().strictMode());
-                    i.putExtra(NightToRiseBlockActivity.EXTRA_PACKAGE, pkg);
-                    i.putExtra(NightToRiseBlockActivity.EXTRA_PHASE, d.phase.name());
-                    boolean shown = launchBlockScreen(ctx, i, "Sleep to Rise",
-                        d.phase == NightToRiseManager.Phase.RISE_LOCK
-                            ? "Rise with intention\n" + d.message
-                            : "Rest now\n" + d.message,
-                        true, d.phase == NightToRiseManager.Phase.RISE_LOCK, leaveApp);
-                    if (!shown) leave(leaveApp);
-                } else if (!isBlockScreenForeground()) {
-                    leave(leaveApp);
-                }
-                return new Result(true, true);
-            }
-        } catch (Throwable t) {
-            Log.w(TAG, "Sleep to Rise check failed", t);
-        }
 
         try {
             ShieldPreferences prefs = new ShieldPreferences(ctx);
@@ -188,8 +154,7 @@ public final class BlockEnforcer {
 
     private static boolean isBlockScreenForeground() {
         String foreground = lastForegroundPackage();
-        return foreground != null
-            && (foreground.contains("ShieldBlock") || foreground.contains("NightToRise"));
+        return foreground != null && foreground.contains("ShieldBlock");
     }
 
     public static boolean presentShield(Context ctx, Intent blockIntent, Runnable leaveApp) {
@@ -249,40 +214,6 @@ public final class BlockEnforcer {
             "Shield is protecting your focus", "This app is blocked right now.");
         if (!shown) leave(leaveApp);
         return shown;
-    }
-
-    private static boolean launchBlockScreen(Context ctx, Intent i, String title, String body,
-                                             boolean sleepToRise, boolean rise, Runnable leaveApp) {
-        lastBlockAt = System.currentTimeMillis();
-        lastBlockedPkg = i.getStringExtra(NightToRiseBlockActivity.EXTRA_PACKAGE);
-
-        if (com.mylifeos.app.shield.ShieldAccessibilityService.launchBlockActivity(i)) {
-            lastError = null;
-            return true;
-        }
-
-        if (canStartActivityFromBackground(ctx)) {
-            try {
-                ctx.startActivity(i);
-                lastError = null;
-                return true;
-            } catch (Throwable t) {
-                Log.w(TAG, "startActivity for block screen rejected", t);
-                lastError = "startActivity rejected: " + t.getMessage();
-            }
-        } else {
-            lastError = "background activity start not permitted (no overlay permission / accessibility off)";
-        }
-        if (com.mylifeos.app.shield.ShieldAccessibilityService.showBlockingOverlay(
-                sleepToRise, rise, title, body, leaveApp)) {
-            lastError = null;
-            return true;
-        }
-        if (BlockingOverlay.showSystem(ctx, sleepToRise, rise, title, body, leaveApp)) {
-            lastError = null;
-            return true;
-        }
-        return showFullScreenFallback(ctx, i, title, body);
     }
 
     private static boolean canUseFullScreenIntent(Context ctx) {
