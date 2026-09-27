@@ -39,22 +39,18 @@ public final class BlockingOverlay {
 
     public static synchronized boolean show(
         AccessibilityService service,
-        boolean sleepToRise,
-        boolean rise,
         String title,
         String message,
         Runnable onHome
     ) {
         if (service == null) return false;
         return render(service, WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            sleepToRise, rise, title, message, onHome);
+            title, message, onHome);
     }
 
     /** Accessibility-independent tier. Requires SYSTEM_ALERT_WINDOW only. */
     public static synchronized boolean showSystem(
         Context ctx,
-        boolean sleepToRise,
-        boolean rise,
         String title,
         String message,
         Runnable onHome
@@ -70,14 +66,12 @@ public final class BlockingOverlay {
         int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
             ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
             : WindowManager.LayoutParams.TYPE_PHONE;
-        return render(ctx.getApplicationContext(), type, sleepToRise, rise, title, message, onHome);
+        return render(ctx.getApplicationContext(), type, title, message, onHome);
     }
 
     private static boolean render(
         Context ctx,
         int windowType,
-        boolean unusedLegacyFlag,
-        boolean unusedLegacyRise,
         String title,
         String message,
         Runnable onHome
