@@ -19,7 +19,6 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 // [N2R-CARD] card-only Sleep/Rise block, shared with the Activity fallback.
-import com.mylifeos.app.nighttorise.NightToRiseBlockCard;
 
 /**
  * Reliable full-screen block surface.
@@ -77,94 +76,16 @@ public final class BlockingOverlay {
     private static boolean render(
         Context ctx,
         int windowType,
-        boolean sleepToRise,
-        boolean rise,
+        boolean unusedLegacyFlag,
+        boolean unusedLegacyRise,
         String title,
         String message,
         Runnable onHome
     ) {
-        if (!sleepToRise) {
-            // [SHIELD-CARD] Shield blocks always use the shared card (Sleep/Rise path below is untouched).
-            return renderCard(ctx, windowType, ShieldBlockCard.Spec.generic(title, message), onHome);
-        }
-        hide();
-        try {
-            WindowManager wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
-            if (wm == null) return false;
-
-            // [N2R-CARD] Sleep/Rise: card-only, nothing painted behind it. The old
-            // full-screen gradient path below is left in place, untouched, as the
-            // fallback for a Shield-only app block (sleepToRise == false).
-            if (sleepToRise) {
-                return renderNightCard(ctx, windowType, rise, title, message, onHome);
-            }
-
-            LinearLayout root = new LinearLayout(ctx);
-            root.setOrientation(LinearLayout.VERTICAL);
-            root.setGravity(Gravity.CENTER);
-            root.setClickable(true);
-            root.setFocusable(true);
-            root.setPadding(dp(ctx, 32), dp(ctx, 56), dp(ctx, 32), dp(ctx, 40));
-            int[] colors = sleepToRise
-                ? (rise ? new int[]{0xff321d43, 0xffb95658, 0xfff09a48}
-                        : new int[]{0xff090f24, 0xff18173f, 0xff302267})
-                : new int[]{0xff111827, 0xff1f2937, 0xff0b0f16};
-            root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR, colors));
-
-            TextView icon = text(ctx, sleepToRise ? (rise ? "☀" : "☾") : "◆", 48, Color.WHITE);
-            icon.setGravity(Gravity.CENTER);
-            root.addView(icon, matchWrap());
-
-            TextView heading = text(ctx, title, 30, Color.WHITE);
-            heading.setTypeface(null, Typeface.BOLD);
-            heading.setGravity(Gravity.CENTER);
-            LinearLayout.LayoutParams headingLp = matchWrap();
-            headingLp.topMargin = dp(ctx, 24);
-            root.addView(heading, headingLp);
-
-            TextView body = text(ctx, message, 16, 0xddffffff);
-            body.setGravity(Gravity.CENTER);
-            body.setLineSpacing(0, 1.25f);
-            LinearLayout.LayoutParams bodyLp = matchWrap();
-            bodyLp.topMargin = dp(ctx, 14);
-            bodyLp.bottomMargin = dp(ctx, 42);
-            root.addView(body, bodyLp);
-
-            Button home = new Button(ctx);
-            home.setText(sleepToRise ? "Return to Home" : "Go Back Home");
-            home.setTextSize(16);
-            home.setTextColor(0xff172033);
-            home.setAllCaps(false);
-            home.setTypeface(null, Typeface.BOLD);
-            GradientDrawable buttonBg = new GradientDrawable();
-            buttonBg.setColor(Color.WHITE);
-            buttonBg.setCornerRadius(dp(ctx, 28));
-            home.setBackground(buttonBg);
-            home.setOnClickListener(v -> {
-                hide();
-                if (onHome != null) onHome.run();
-            });
-            LinearLayout.LayoutParams buttonLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(ctx, 56));
-            root.addView(home, buttonLp);
-
-            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                windowType,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT);
-            lp.gravity = Gravity.TOP | Gravity.START;
-            wm.addView(root, lp);
-            activeView = root;
-            activeWindowManager = wm;
-            return true;
-        } catch (Throwable ignored) {
-            hide();
-            return false;
-        }
+        // Shield blocks always use the shared card surface.
+        return renderCard(ctx, windowType, ShieldBlockCard.Spec.generic(title, message), onHome);
     }
+
 
     // [SHIELD-CARD] ---------------------------------------------------------------
     // Shield block card. Overlay tier 1 (accessibility) and tier 2 (system overlay).
@@ -242,59 +163,6 @@ public final class BlockingOverlay {
 
             // Safety valve: the card can never stay on screen forever.
             final View shown = root;
-            cardHandler.postDelayed(() -> {
-                synchronized (BlockingOverlay.class) {
-                    if (activeView == shown) hide();
-                }
-            }, CARD_FAILSAFE_MS);
-            return true;
-        } catch (Throwable ignored) {
-            hide();
-            return false;
-        }
-    }
-
-    // [N2R-CARD] -----------------------------------------------------------------
-    private static boolean renderNightCard(
-        Context ctx, int windowType, boolean rise, String title, String message, Runnable onHome
-    ) {
-        try {
-            WindowManager wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
-            if (wm == null) return false;
-
-            android.widget.FrameLayout outer = new android.widget.FrameLayout(ctx);
-            outer.setClickable(true);
-            outer.setFocusable(true);
-
-            NightToRiseBlockCard.Handles ui = NightToRiseBlockCard.build(ctx, rise);
-            if (title != null && !title.isEmpty()) ui.title.setText(title);
-            if (message != null && !message.isEmpty()) ui.message.setText(message);
-            ui.countdown.setText("");
-            ui.countdownBox.setVisibility(View.GONE);
-            ui.override.setVisibility(View.GONE);
-            ui.home.setOnClickListener(v -> {
-                hide();
-                if (onHome != null) onHome.run();
-            });
-            outer.addView(ui.root, new android.widget.FrameLayout.LayoutParams(
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT,
-                android.widget.FrameLayout.LayoutParams.MATCH_PARENT));
-
-            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
-                windowType,
-                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT);
-            lp.gravity = Gravity.TOP | Gravity.START;
-            wm.addView(outer, lp);
-            activeView = outer;
-            activeWindowManager = wm;
-
-            // [N2R-REBOOT-FIX] Same safety valve Shield's card already has: this
-            // surface can never stay on screen forever, no matter what triggered it.
-            final View shown = outer;
             cardHandler.postDelayed(() -> {
                 synchronized (BlockingOverlay.class) {
                     if (activeView == shown) hide();
