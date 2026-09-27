@@ -130,7 +130,7 @@ public final class BlockEnforcer {
                     } else if (!isBlockScreenForeground()) {
                         leave(leaveApp);
                     }
-                    return new Result(true, false);
+                    return new Result(true);
                 }
             }
         } catch (Throwable t) {
