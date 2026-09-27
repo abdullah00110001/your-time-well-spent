@@ -91,9 +91,7 @@ import AdminRingtones from "./pages/admin/AdminRingtones";
 import AdminBundles from "./pages/admin/AdminBundles";
 import DownloadApp from "./pages/DownloadApp";
 import RiseRingScreen from "./pages/RiseRingScreen";
-import NightToRise from "./pages/NightToRise";
 import Welcome from "./pages/Welcome";
-import { NightToRiseGuard } from "@/components/rise/night-to-rise/NightToRiseGuard";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -158,7 +156,6 @@ const AppContent = () => {
       <SmartNotificationProvider />
       <ScrollToTop />
       <AnnouncementPopup />
-      <NightToRiseGuard />
       <JoinByInviteHandler />
       <Routes>
         <Route path="/" element={<LandingPage />} />
@@ -199,7 +196,6 @@ const AppContent = () => {
         <Route path="/comparative-analytics" element={<ProtectedRoute><ComparativeAnalytics /></ProtectedRoute>} />
         <Route path="/shield" element={<ProtectedRoute><ShieldPage /></ProtectedRoute>} />
         <Route path="/rise" element={<ProtectedRoute><RisePage /></ProtectedRoute>} />
-        <Route path="/rise/night-to-rise" element={<ProtectedRoute><NightToRise /></ProtectedRoute>} />
         
         {/* 🟢 ওয়েক আপ স্ক্রিন - কোনো ড্যাশবোর্ড ফিলিকার ছাড়াই সরাসরি এখানে ল্যান্ড করবে */}
         <Route path="/rise/ring/:id" element={<RiseRingScreen />} />
