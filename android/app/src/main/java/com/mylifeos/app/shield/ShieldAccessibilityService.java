@@ -136,22 +136,20 @@ public class ShieldAccessibilityService extends AccessibilityService {
         }
     }
 
-    public static void scheduleBlockingOverlay(boolean sleepToRise, boolean rise,
-                                               String title, String message, Runnable onHome) {
+    public static void scheduleBlockingOverlay(String title, String message, Runnable onHome) {
         ShieldAccessibilityService svc = instance;
         if (svc == null) return;
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             ShieldAccessibilityService current = instance;
             if (current != null) {
-                BlockingOverlay.show(current, sleepToRise, rise, title, message, onHome);
+                BlockingOverlay.show(current, title, message, onHome);
             }
         }, 450);
     }
 
-    public static boolean showBlockingOverlay(boolean sleepToRise, boolean rise,
-                                              String title, String message, Runnable onHome) {
+    public static boolean showBlockingOverlay(String title, String message, Runnable onHome) {
         ShieldAccessibilityService svc = instance;
-        return svc != null && BlockingOverlay.show(svc, sleepToRise, rise, title, message, onHome);
+        return svc != null && BlockingOverlay.show(svc, title, message, onHome);
     }
 
     public static void dismissBlockingOverlay() { BlockingOverlay.hide(); }
