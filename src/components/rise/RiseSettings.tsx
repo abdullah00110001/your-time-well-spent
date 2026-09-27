@@ -17,7 +17,6 @@ import { requestAllAlarmPermissions } from '@/lib/capacitor/nativeAlarm';
 import { requestNotificationPermission, openBatterySettings } from '@/lib/capacitor/permissions';
 import { useGroupSettings } from '@/hooks/useGroupSettings';
 import { toast } from 'sonner';
-import { NightToRiseCard } from './night-to-rise/NightToRiseCard';
 import { Preferences } from '@capacitor/preferences';
 import { Slider } from '@/components/ui/slider';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
@@ -264,8 +263,6 @@ export function RiseSettings() {
 
   return (
     <div className="space-y-4">
-      <NightToRiseCard onOpen={() => navigate('/rise/night-to-rise')} riseAlarmTime={nextAlarmTime} />
-
       <Collapsible open={dndOpen} onOpenChange={setDndOpen}>
         <CollapsibleTrigger asChild>
           <Card className="cursor-pointer hover:border-primary/30 transition-colors">

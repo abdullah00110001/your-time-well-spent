@@ -272,14 +272,5 @@
             android:exported="false"
             android:theme="@style/AppTheme.NoActionBar"
             android:screenOrientation="portrait" />
-        <activity
-            android:name="com.mylifeos.app.nighttorise.NightToRiseBlockActivity"
-            android:exported="false"
-            android:launchMode="singleTask"
-            android:taskAffinity=""
-            android:excludeFromRecents="true"
-            android:showWhenLocked="true"
-            android:turnScreenOn="true"
-            android:theme="@style/AppTheme.SleepToRiseBlock" />
     </application>
 </manifest>

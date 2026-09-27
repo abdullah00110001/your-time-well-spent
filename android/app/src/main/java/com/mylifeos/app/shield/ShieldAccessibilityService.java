@@ -136,22 +136,20 @@ public class ShieldAccessibilityService extends AccessibilityService {
         }
     }
 
-    public static void scheduleBlockingOverlay(boolean sleepToRise, boolean rise,
-                                               String title, String message, Runnable onHome) {
+    public static void scheduleBlockingOverlay(String title, String message, Runnable onHome) {
         ShieldAccessibilityService svc = instance;
         if (svc == null) return;
         new Handler(Looper.getMainLooper()).postDelayed(() -> {
             ShieldAccessibilityService current = instance;
             if (current != null) {
-                BlockingOverlay.show(current, sleepToRise, rise, title, message, onHome);
+                BlockingOverlay.show(current, title, message, onHome);
             }
         }, 450);
     }
 
-    public static boolean showBlockingOverlay(boolean sleepToRise, boolean rise,
-                                              String title, String message, Runnable onHome) {
+    public static boolean showBlockingOverlay(String title, String message, Runnable onHome) {
         ShieldAccessibilityService svc = instance;
-        return svc != null && BlockingOverlay.show(svc, sleepToRise, rise, title, message, onHome);
+        return svc != null && BlockingOverlay.show(svc, title, message, onHome);
     }
 
     public static void dismissBlockingOverlay() { BlockingOverlay.hide(); }
@@ -336,8 +334,6 @@ public class ShieldAccessibilityService extends AccessibilityService {
         // waiting out the throttle window in sync().
         try { com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(this); }
         catch (Throwable t) { Log.w(TAG, "guard sync", t); }
-        try { com.mylifeos.app.nighttorise.NightToRiseManager.invalidateSafetyCache(); }
-        catch (Throwable ignored) {}
         Log.d(TAG, "🛡️ Shield Connected — keywords: " + adultKeywordsSet.size()
             + ", sites: " + adultSitesList.size()
             + ", browsers: " + getAllBrowserPackages().size());
@@ -460,8 +456,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
 
         // Never act on our own app or the block screens (breaks self-triggering loops).
         if (packageName.equals(getPackageName())
-            || packageName.contains("ShieldBlock")
-            || packageName.contains("NightToRise")) return;
+            || packageName.contains("ShieldBlock")) return;
 
         int type = event.getEventType();
 
@@ -965,7 +960,7 @@ public class ShieldAccessibilityService extends AccessibilityService {
     /** Scoped to browsers + explicitly monitored apps only — never a global "scan everything". */
     private boolean isContentScanTarget(String pkg) {
         if (pkg == null) return false;
-        if (pkg.equals(getPackageName()) || pkg.contains("ShieldBlock") || pkg.contains("NightToRise")) {
+        if (pkg.equals(getPackageName()) || pkg.contains("ShieldBlock")) {
             return false;
         }
         return isBrowser(pkg) || monitoredApps.contains(pkg);

@@ -21,7 +21,6 @@ import androidx.core.app.NotificationCompat;
 
 import com.mylifeos.app.MainActivity;
 import com.mylifeos.app.R;
-import com.mylifeos.app.nighttorise.NightToRiseManager;
 import com.mylifeos.app.shield.ShieldPreferences;
 
 import java.text.SimpleDateFormat;
@@ -59,7 +58,6 @@ public class ForegroundGuardService extends Service {
     public static void forceSync(Context ctx) {
         lastSyncAt = 0L;
         lastSyncNeeded = null;
-        com.mylifeos.app.nighttorise.NightToRiseManager.invalidateSafetyCache();
         sync(ctx);
     }
 
@@ -67,12 +65,8 @@ public class ForegroundGuardService extends Service {
         long now = android.os.SystemClock.elapsedRealtime();
         if (lastSyncNeeded != null && now - lastSyncAt < SYNC_MIN_INTERVAL_MS) return;
         try {
-            com.mylifeos.app.nighttorise.NightToRisePreferences n2rPrefs =
-                new com.mylifeos.app.nighttorise.NightToRisePreferences(ctx);
-            boolean n2rOn = n2rPrefs.isEnabled();
             Set<String> allowed = new ShieldPreferences(ctx).getAllowedApps();
-            boolean shieldOn = allowed != null && !allowed.isEmpty();
-            boolean needed = n2rOn || shieldOn;
+            boolean needed = allowed != null && !allowed.isEmpty();
             lastSyncAt = now;
 
             if (lastSyncNeeded != null && lastSyncNeeded == needed && running == needed) return;
@@ -149,39 +143,32 @@ public class ForegroundGuardService extends Service {
     public IBinder onBind(Intent intent) { return null; }
 
     private void pass() {
-        NightToRiseManager n2r = new NightToRiseManager(this);
-        NightToRiseManager.Decision probe = n2r.decide(System.currentTimeMillis(), PROBE_PACKAGE);
-        if (probe.shouldBlock) nextDelay = POLL_FAST_MS;
         String pkg = screenOn ? currentForegroundPackage() : lastKnownPkg;
 
         boolean accessibilityAvailable = com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()
             || hasA11yPermCached();
 
-        BlockEnforcer.noteGuardPass(probe.phase.name(), probe.shouldBlock, pkg,
-            hasUsageAccess(), accessibilityAvailable);
-
-        com.mylifeos.app.nighttorise.GuardTransitionNotifier.onDecision(this, probe);
-
-        boolean shieldHasAllowed = false;
+        int allowedCount = 0;
         try {
             Set<String> allowedApps = new ShieldPreferences(this).getAllowedApps();
-            shieldHasAllowed = allowedApps != null && !allowedApps.isEmpty();
+            allowedCount = allowedApps == null ? 0 : allowedApps.size();
         } catch (Throwable ignored) {}
 
-        if (shieldHasAllowed) nextDelay = POLL_FAST_MS;
-        if (!probe.shouldBlock && !shieldHasAllowed && !n2r.prefs().isEnabled()) {
+        BlockEnforcer.noteGuardPass("SHIELD", allowedCount > 0, pkg,
+            hasUsageAccess(), accessibilityAvailable);
+
+        if (allowedCount == 0) {
             stopSelf();
             return;
         }
+        nextDelay = POLL_FAST_MS;
 
-        updateNotification(probe, pkg != null && canLeaveApp());
+        updateNotification(allowedCount, pkg != null && canLeaveApp());
 
-        if (pkg == null) {
-            if (probe.shouldBlock) Log.w(TAG, "Lock active but no foreground-app signal available");
-            return;
-        }
+        if (pkg == null) return;
         BlockEnforcer.enforce(this, pkg, this::goHome);
     }
+
 
     private boolean canLeaveApp() {
         if (com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()) return true;
@@ -277,39 +264,19 @@ public class ForegroundGuardService extends Service {
         }
     }
 
-    private void updateNotification(NightToRiseManager.Decision probe, boolean canEnforce) {
+    private void updateNotification(int allowedCount, boolean canEnforce) {
         String title;
         String text;
 
-        boolean locking = probe.shouldBlock;
-        if (locking && !canEnforce) {
-            title = "Sleep to Rise — permission needed";
-            text = "Grant Usage Access or Accessibility to enforce this lock";
-        } else if (locking) {
-            String until = probe.endTimeMs > 0
-                ? new SimpleDateFormat("h:mm a", Locale.getDefault()).format(new Date(probe.endTimeMs))
-                : null;
-            boolean isRise = probe.phase == NightToRiseManager.Phase.RISE_LOCK;
-            title = isRise
-                ? "🌅 Sleep to Rise — rise lock ACTIVE"
-                : "🌙 Sleep to Rise — sleep lock ACTIVE";
-            text = "Only your allowed apps can open"
-                + (until != null ? " · until " + until : "");
+        if (allowedCount > 0 && !canEnforce) {
+            title = "Shield — permission needed";
+            text = "Grant Usage Access or Accessibility to enforce blocking";
+        } else if (allowedCount > 0) {
+            title = "Shield protection active";
+            text = allowedCount + " app" + (allowedCount == 1 ? "" : "s") + " allowed right now";
         } else {
-            int allowedCount = 0;
-            try {
-                Set<String> allowed = new ShieldPreferences(this).getAllowedApps();
-                allowedCount = allowed == null ? 0 : allowed.size();
-            } catch (Throwable ignored) {}
-            switch (probe.phase) {
-                case PAUSED:       title = "Sleep to Rise — paused tonight"; break;
-                case INACTIVE_DAY: title = "Sleep to Rise — not scheduled today"; break;
-                case OFF:          title = "Shield protection running"; break;
-                default:           title = "Sleep to Rise — armed"; break;
-            }
-            text = allowedCount > 0
-                ? allowedCount + " app" + (allowedCount == 1 ? "" : "s") + " allowed by Shield"
-                : "Lock is not enforcing right now";
+            title = "Shield protection running";
+            text = "No app allowlist is active";
         }
 
         String signature = title + "|" + text;
@@ -319,6 +286,7 @@ public class ForegroundGuardService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(NOTIF_ID, buildNotification(title, text));
     }
+
 
     private Notification buildNotification(String title, String text) {
         Intent open = new Intent(this, MainActivity.class);

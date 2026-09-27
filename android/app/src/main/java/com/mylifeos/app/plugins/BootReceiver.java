@@ -82,13 +82,6 @@ public class BootReceiver extends BroadcastReceiver {
             Log.e(TAG, "Alarm restore crashed", t);
         }
 
-        // Re-arm Sleep to Rise enforcement state (window / alarm reference).
-        try {
-            com.mylifeos.app.nighttorise.NightToRiseManager.onBootRestored(context);
-        } catch (Throwable t) {
-            Log.w(TAG, "NightToRise boot restore skipped: " + t.getMessage());
-        }
-
         Log.d(TAG, "Restore complete → restored=" + restored
                 + " dropped=" + dropped + " failed=" + failed);
     }
