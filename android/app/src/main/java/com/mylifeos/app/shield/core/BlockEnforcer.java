@@ -111,6 +111,36 @@ public final class BlockEnforcer {
     public static Result enforce(Context ctx, String pkg, Runnable leaveApp) {
         if (isNeverBlockable(ctx, pkg) || isProtectedSystemPackage(pkg)) return Result.NONE;
 
+        // Sleep to Rise: same pipeline, same card, its own allowlist.
+        try {
+            String phase = SleepToRise.phase(ctx);
+            boolean locking = SleepToRise.PHASE_SLEEP.equals(phase) || SleepToRise.PHASE_RISE.equals(phase);
+            if (locking) {
+                if (SleepToRise.isAlwaysSafe(ctx, pkg)) return Result.NONE;
+                if (!SleepToRise.allowed(ctx).contains(pkg)) {
+                    if (allowScreen(pkg)) {
+                        if (!SleepToRise.recordBlockAndCheck(ctx)) return Result.NONE;
+                        Intent intent = new Intent(ctx, ShieldBlockActivity.class);
+                        intent.putExtra("BLOCKED_PACKAGE", pkg);
+                        intent.putExtra("IS_ADULT_BLOCK", false);
+                        intent.putExtra("BLOCK_KIND", SleepToRise.PHASE_RISE.equals(phase) ? "rise" : "sleep");
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                            | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                            | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                            | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+                        presentShield(ctx, intent, leaveApp);
+                    } else if (!isBlockScreenForeground()) {
+                        leave(leaveApp);
+                    }
+                    return new Result(true);
+                }
+                return Result.NONE;
+            }
+        } catch (Throwable t) {
+            Log.w(TAG, "Sleep to Rise enforcement failed", t);
+        }
+
+
 
         try {
             ShieldPreferences prefs = new ShieldPreferences(ctx);

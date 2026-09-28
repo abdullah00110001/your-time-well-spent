@@ -120,6 +120,24 @@ export interface ShieldPluginInterface {
 
   getTelegramGuard(): Promise<TelegramGuardSettings>;
   setTelegramGuard(options: Partial<TelegramGuardSettings>): Promise<TelegramGuardSettings>;
+
+  setSleepToRise(options: SleepToRiseConfig): Promise<SleepToRiseState>;
+  getSleepToRise(): Promise<SleepToRiseState>;
+  resumeSleepToRise(): Promise<SleepToRiseState>;
+}
+
+export interface SleepToRiseConfig {
+  enabled: boolean;
+  startMin: number;
+  endMin: number;
+  riseGuardMin: number;
+  allowedApps: string[];
+}
+
+export interface SleepToRiseState extends SleepToRiseConfig {
+  phase: 'OFF' | 'IDLE' | 'SLEEP' | 'RISE' | 'PAUSED';
+  pausedUntil: number;
+  lastSafetyTrip: number;
 }
 
 export interface TelegramGuardSettings {

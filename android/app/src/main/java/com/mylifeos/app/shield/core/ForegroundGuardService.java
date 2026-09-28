@@ -66,7 +66,7 @@ public class ForegroundGuardService extends Service {
         if (lastSyncNeeded != null && now - lastSyncAt < SYNC_MIN_INTERVAL_MS) return;
         try {
             Set<String> allowed = new ShieldPreferences(ctx).getAllowedApps();
-            boolean needed = allowed != null && !allowed.isEmpty();
+            boolean needed = (allowed != null && !allowed.isEmpty()) || SleepToRise.isEnabled(ctx);
             lastSyncAt = now;
 
             if (lastSyncNeeded != null && lastSyncNeeded == needed && running == needed) return;
@@ -154,16 +154,24 @@ public class ForegroundGuardService extends Service {
             allowedCount = allowedApps == null ? 0 : allowedApps.size();
         } catch (Throwable ignored) {}
 
-        BlockEnforcer.noteGuardPass("SHIELD", allowedCount > 0, pkg,
-            hasUsageAccess(), accessibilityAvailable);
+        boolean sleepEnabled = SleepToRise.isEnabled(this);
+        boolean sleepLocking = sleepEnabled && SleepToRise.isLocking(this);
 
-        if (allowedCount == 0) {
+        BlockEnforcer.noteGuardPass(sleepLocking ? "SLEEP_TO_RISE" : "SHIELD",
+            allowedCount > 0 || sleepLocking, pkg, hasUsageAccess(), accessibilityAvailable);
+
+        if (allowedCount == 0 && !sleepEnabled) {
             stopSelf();
+            return;
+        }
+        if (allowedCount == 0 && !sleepLocking) {
+            // Sleep to Rise waiting for its window: poll slowly, block nothing.
+            updateNotification(0, true);
             return;
         }
         nextDelay = POLL_FAST_MS;
 
-        updateNotification(allowedCount, pkg != null && canLeaveApp());
+        updateNotification(Math.max(1, allowedCount), pkg != null && canLeaveApp());
 
         if (pkg == null) return;
         BlockEnforcer.enforce(this, pkg, this::goHome);

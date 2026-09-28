@@ -22,6 +22,7 @@ import { Slider } from '@/components/ui/slider';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { RingtonePicker } from './RingtonePicker';
 import { pickDeviceRingtone } from '@/lib/capacitor/nativeRingtonePicker';
+import { SleepToRiseSection } from './SleepToRiseSection';
 
 /* ---------------------------------------------------------------------------
  * Persistence — keys MUST match AlarmSettingsPreferences.java on Android.
@@ -263,6 +264,7 @@ export function RiseSettings() {
 
   return (
     <div className="space-y-4">
+      <SleepToRiseSection />
       <Collapsible open={dndOpen} onOpenChange={setDndOpen}>
         <CollapsibleTrigger asChild>
           <Card className="cursor-pointer hover:border-primary/30 transition-colors">
