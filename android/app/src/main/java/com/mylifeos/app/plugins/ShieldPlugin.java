@@ -147,6 +147,51 @@ public class ShieldPlugin extends Plugin {
         }
     }
 
+    // ------------------------
+    // SLEEP TO RISE (schedule only — enforcement is Shield's BlockEnforcer)
+    // ------------------------
+    @PluginMethod
+    public void setSleepToRise(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            JSArray arr = call.getArray("allowedApps");
+            Set<String> apps = new HashSet<>();
+            if (arr != null) for (int i = 0; i < arr.length(); i++) apps.add(arr.getString(i));
+            com.mylifeos.app.shield.core.SleepToRise.save(ctx,
+                Boolean.TRUE.equals(call.getBoolean("enabled", false)),
+                call.getInt("startMin", 23 * 60),
+                call.getInt("endMin", 6 * 60),
+                call.getInt("riseGuardMin", 15),
+                apps);
+            com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(ctx);
+            getSleepToRise(call);
+        } catch (Exception e) {
+            call.reject("Failed to save Sleep to Rise", e);
+        }
+    }
+
+    @PluginMethod
+    public void getSleepToRise(PluginCall call) {
+        Context ctx = getContext();
+        JSObject ret = new JSObject();
+        ret.put("enabled", com.mylifeos.app.shield.core.SleepToRise.isEnabled(ctx));
+        ret.put("startMin", com.mylifeos.app.shield.core.SleepToRise.startMin(ctx));
+        ret.put("endMin", com.mylifeos.app.shield.core.SleepToRise.endMin(ctx));
+        ret.put("riseGuardMin", com.mylifeos.app.shield.core.SleepToRise.riseGuardMin(ctx));
+        ret.put("allowedApps", toJsArray(com.mylifeos.app.shield.core.SleepToRise.allowed(ctx)));
+        ret.put("phase", com.mylifeos.app.shield.core.SleepToRise.phase(ctx));
+        ret.put("pausedUntil", com.mylifeos.app.shield.core.SleepToRise.pausedUntil(ctx));
+        ret.put("lastSafetyTrip", com.mylifeos.app.shield.core.SleepToRise.lastSafetyTrip(ctx));
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void resumeSleepToRise(PluginCall call) {
+        com.mylifeos.app.shield.core.SleepToRise.clearPause(getContext());
+        com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(getContext());
+        getSleepToRise(call);
+    }
+
     // Legacy aliases: kept so older app code continues to work while the architecture is allowlist-based.
     @PluginMethod
     public void getBlockedApps(PluginCall call) {
