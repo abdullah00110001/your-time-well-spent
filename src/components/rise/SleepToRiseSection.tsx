@@ -32,7 +32,7 @@ const PHASE_LABEL: Record<SleepToRiseState['phase'], string> = {
 };
 
 export function SleepToRiseSection() {
-  const native = isNative();
+  const native = Boolean(isNative);
   const [state, setState] = useState<SleepToRiseState>(DEFAULT_STATE);
   const [perms, setPerms] = useState<Perms | null>(null);
   const [saving, setSaving] = useState(false);
