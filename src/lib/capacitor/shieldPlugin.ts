@@ -124,6 +124,7 @@ export interface ShieldPluginInterface {
   setSleepToRise(options: SleepToRiseConfig): Promise<SleepToRiseState>;
   getSleepToRise(): Promise<SleepToRiseState>;
   resumeSleepToRise(): Promise<SleepToRiseState>;
+  finishRiseGuard(): Promise<SleepToRiseState>;
 }
 
 export interface SleepToRiseConfig {

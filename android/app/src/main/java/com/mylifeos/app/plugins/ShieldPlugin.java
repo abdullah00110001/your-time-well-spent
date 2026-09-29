@@ -192,6 +192,13 @@ public class ShieldPlugin extends Plugin {
         getSleepToRise(call);
     }
 
+    @PluginMethod
+    public void finishRiseGuard(PluginCall call) {
+        com.mylifeos.app.shield.core.SleepToRise.markRiseDone(getContext());
+        com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(getContext());
+        getSleepToRise(call);
+    }
+
     // Legacy aliases: kept so older app code continues to work while the architecture is allowlist-based.
     @PluginMethod
     public void getBlockedApps(PluginCall call) {
