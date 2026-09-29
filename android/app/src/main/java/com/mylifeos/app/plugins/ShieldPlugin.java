@@ -538,7 +538,4 @@ public class ShieldPlugin extends Plugin {
             call.reject("Failed to get screen time stats", e);
         }
     }
-
-    @PluginMethod
-    public void getCurrentMode(PluginCall call) { /* duplicate removed below? */ }
 }
