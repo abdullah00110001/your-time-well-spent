@@ -68,6 +68,8 @@ public final class SleepToRise {
     }
     public static long pausedUntil(Context ctx) { return p(ctx).getLong("paused_until", 0L); }
     public static void clearPause(Context ctx) { p(ctx).edit().putLong("paused_until", 0L).commit(); }
+    /** Morning mission done: ends the Rise guard early for today. */
+    public static void markRiseDone(Context ctx) { p(ctx).edit().putLong("rise_done_at", System.currentTimeMillis()).commit(); }
 
     private static int clampMin(int m) { return ((m % 1440) + 1440) % 1440; }
 
@@ -82,7 +84,11 @@ public final class SleepToRise {
             if (start == end) return PHASE_IDLE;
             if (inRange(now, start, end)) return PHASE_SLEEP;
             int guard = riseGuardMin(ctx);
-            if (guard > 0 && inRange(now, end, clampMin(end + guard))) return PHASE_RISE;
+            if (guard > 0 && inRange(now, end, clampMin(end + guard))) {
+                long doneAt = p(ctx).getLong("rise_done_at", 0L);
+                if (System.currentTimeMillis() - doneAt < (guard + 5) * 60_000L) return PHASE_IDLE;
+                return PHASE_RISE;
+            }
             return PHASE_IDLE;
         } catch (Throwable t) {
             Log.w(TAG, "phase failed", t);

@@ -175,6 +175,14 @@ export default function RiseRingScreen() {
     isCompletedRef.current = true;
     try { await stopAlarm(); } catch {}
     try { await setPresence({ status: 'idle' }); } catch {}
+    try {
+      const { Capacitor } = await import('@capacitor/core');
+      if (Capacitor.getPlatform() === 'android') {
+        const mod: any = await import('@/lib/capacitor/shieldPlugin');
+        const plugin = mod.ShieldPlugin ?? mod.default;
+        await plugin?.finishRiseGuard?.();
+      }
+    } catch {}
 
     if (alarm?.id && alarm.id !== 'fallback') {
       try {
