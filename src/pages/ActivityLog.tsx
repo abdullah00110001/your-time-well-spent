@@ -7,6 +7,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { pruneActivityLog } from '@/hooks/useActivityLogger';
 import { ChevronLeft, ChevronRight, Download, Loader2, ScrollText, Activity } from 'lucide-react';
+import DeviceLogPanel from '@/components/logs/DeviceLogPanel';
 
 interface LogRow {
   id: string;
@@ -42,11 +43,12 @@ export default function ActivityLog() {
   const { user } = useAuth();
   const [rows, setRows] = useState<LogRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [tab, setTab] = useState<'device' | 'cloud'>('device');
 
   const activeSource = source ? decodeURIComponent(source) : null;
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) { setLoading(false); return; }
     let cancelled = false;
     const load = async () => {
       setLoading(true);
@@ -121,7 +123,16 @@ export default function ActivityLog() {
           )}
         </div>
 
-        {loading ? (
+        {!activeSource && (
+          <div className="mb-4 flex gap-2">
+            <Button size="sm" variant={tab === 'device' ? 'default' : 'outline'} onClick={() => setTab('device')}>This device (live)</Button>
+            <Button size="sm" variant={tab === 'cloud' ? 'default' : 'outline'} onClick={() => setTab('cloud')}>Account events</Button>
+          </div>
+        )}
+
+        {!activeSource && tab === 'device' ? (
+          <DeviceLogPanel />
+        ) : loading && user ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>

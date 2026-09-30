@@ -273,6 +273,9 @@ export default function RisePage() {
       }
     });
     if (closestAlarm) {
+      // NOTE: the alarm reference handed to native Sleep-to-Rise enforcement is
+      // written in exactly one place (useNightToRise, via useNextRiseAlarm).
+      // This screen must never write it too — two writers used to disagree.
       const diff = closestAlarm.date.getTime() - now.getTime();
       // Fill the arc over the last 12 hours before the alarm.
       const WINDOW_MS = 12 * 60 * 60 * 1000;

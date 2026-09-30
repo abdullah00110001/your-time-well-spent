@@ -51,43 +51,13 @@ public class ShieldPlugin extends Plugin {
         modeManager = new ShieldModeManager(getContext());
         permissionHelper = new ShieldPermissionHelper(getContext());
 
-        new Handler(Looper.getMainLooper()).postDelayed(() -> {
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    setPrivateDns();
-                } else {
-                    startAdultFilterVpn();
-                }
-            } catch (Exception e) {
-                Log.e("ShieldPlugin", "Adult filter auto-start failed", e);
-            }
-        }, 2000);
+        // Adult filter — app open হলেই automatically start
+        /* auto-start DNS disabled for stability */
     }
 
-    private static Set<String> sanitizeAppSet(Set<String> raw) {
-        Set<String> out = new HashSet<>();
-        if (raw == null) return out;
-        for (String pkg : raw) {
-            if (pkg == null) continue;
-            String v = pkg.trim();
-            if (v.isEmpty()) continue;
-            if (v.equals("android") || v.startsWith("com.android.") || v.startsWith("com.google.android.")
-                || v.startsWith("com.sec.android.") || v.startsWith("com.miui.")
-                || v.startsWith("com.oneplus.") || v.startsWith("com.samsung.")
-                || v.startsWith("com.huawei.")) continue;
-            out.add(v);
-        }
-        return out;
-    }
-
-    private static JSArray toJsArray(Set<String> values) {
-        JSArray arr = new JSArray();
-        for (String value : values) {
-            arr.put(value);
-        }
-        return arr;
-    }
-
+    // ==========================================
+    // 🛡️ MASTER CONTROL
+    // ==========================================
     @PluginMethod
     public void isEnabled(PluginCall call) {
         JSObject ret = new JSObject();
@@ -111,6 +81,9 @@ public class ShieldPlugin extends Plugin {
         call.resolve();
     }
 
+    // ==========================================
+    // 🧠 SHIELD MODES
+    // ==========================================
     @PluginMethod
     public void getCurrentMode(PluginCall call) {
         JSObject ret = new JSObject();
@@ -119,97 +92,102 @@ public class ShieldPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    // ------------------------
-    // ALLOWLIST APP MANAGEMENT
-    // ------------------------
     @PluginMethod
-    public void getAllowedApps(PluginCall call) {
+    public void activateFocusMode(PluginCall call) {
+        modeManager.activateFocusMode();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void activateSleepMode(PluginCall call) {
+        modeManager.activateSleepMode();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void activateStrictMode(PluginCall call) {
+        modeManager.activateStrictMode();
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void deactivateMode(PluginCall call) {
+        if (modeManager.isStrictMode() && !preferences.isBypassActive()) {
+            call.reject("Strict mode is active!");
+            return;
+        }
+        modeManager.deactivateMode();
+        call.resolve();
+    }
+
+    /**
+     * Escalation base block duration (minutes). Can only be increased — the
+     * escalation manager rejects decreases so users can't soften the penalty.
+     */
+    @PluginMethod
+    public void setEscalationBase(PluginCall call) {
+        Integer minutes = call.getInt("minutes");
+        if (minutes == null) {
+            call.reject("Must provide minutes");
+            return;
+        }
+        boolean updated = new com.mylifeos.app.shield.ShieldEscalationManager(getContext())
+                .setBaseMinutes(minutes);
         JSObject ret = new JSObject();
-        ret.put("apps", toJsArray(preferences.getAllowedApps()));
+        ret.put("success", updated);
         call.resolve(ret);
     }
 
-    @PluginMethod
-    public void setAllowedApps(PluginCall call) {
-        try {
-            JSArray appsArray = call.getArray("apps");
-            Set<String> apps = new HashSet<>();
-            if (appsArray != null) {
-                for (int i = 0; i < appsArray.length(); i++) {
-                    apps.add(appsArray.getString(i));
-                }
-            }
-            preferences.setAllowedApps(sanitizeAppSet(apps));
-            com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(getContext());
-            call.resolve();
-        } catch (Exception e) {
-            call.reject("Failed to update allowlist", e);
-        }
-    }
 
-    // ------------------------
-    // SLEEP TO RISE (schedule only — enforcement is Shield's BlockEnforcer)
-    // ------------------------
-    @PluginMethod
-    public void setSleepToRise(PluginCall call) {
-        try {
-            Context ctx = getContext();
-            JSArray arr = call.getArray("allowedApps");
-            Set<String> apps = new HashSet<>();
-            if (arr != null) for (int i = 0; i < arr.length(); i++) apps.add(arr.getString(i));
-            com.mylifeos.app.shield.core.SleepToRise.save(ctx,
-                Boolean.TRUE.equals(call.getBoolean("enabled", false)),
-                call.getInt("startMin", 23 * 60),
-                call.getInt("endMin", 6 * 60),
-                call.getInt("riseGuardMin", 15),
-                apps);
-            com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(ctx);
-            getSleepToRise(call);
-        } catch (Exception e) {
-            call.reject("Failed to save Sleep to Rise", e);
-        }
-    }
-
-    @PluginMethod
-    public void getSleepToRise(PluginCall call) {
-        Context ctx = getContext();
-        JSObject ret = new JSObject();
-        ret.put("enabled", com.mylifeos.app.shield.core.SleepToRise.isEnabled(ctx));
-        ret.put("startMin", com.mylifeos.app.shield.core.SleepToRise.startMin(ctx));
-        ret.put("endMin", com.mylifeos.app.shield.core.SleepToRise.endMin(ctx));
-        ret.put("riseGuardMin", com.mylifeos.app.shield.core.SleepToRise.riseGuardMin(ctx));
-        ret.put("allowedApps", toJsArray(com.mylifeos.app.shield.core.SleepToRise.allowed(ctx)));
-        ret.put("phase", com.mylifeos.app.shield.core.SleepToRise.phase(ctx));
-        ret.put("pausedUntil", com.mylifeos.app.shield.core.SleepToRise.pausedUntil(ctx));
-        ret.put("lastSafetyTrip", com.mylifeos.app.shield.core.SleepToRise.lastSafetyTrip(ctx));
-        call.resolve(ret);
-    }
-
-    @PluginMethod
-    public void resumeSleepToRise(PluginCall call) {
-        com.mylifeos.app.shield.core.SleepToRise.clearPause(getContext());
-        com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(getContext());
-        getSleepToRise(call);
-    }
-
-    @PluginMethod
-    public void finishRiseGuard(PluginCall call) {
-        com.mylifeos.app.shield.core.SleepToRise.markRiseDone(getContext());
-        com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(getContext());
-        getSleepToRise(call);
-    }
-
-    // Legacy aliases: kept so older app code continues to work while the architecture is allowlist-based.
+    // ==========================================
+    // 📱 BLOCKING LOGIC
+    // ==========================================
     @PluginMethod
     public void getBlockedApps(PluginCall call) {
         JSObject ret = new JSObject();
-        ret.put("apps", toJsArray(preferences.getAllowedApps()));
+        JSArray appsArray = new JSArray();
+        for (String app : preferences.getBlockedApps()) {
+            appsArray.put(app);
+        }
+        ret.put("apps", appsArray);
         call.resolve(ret);
     }
 
     @PluginMethod
     public void blockApps(PluginCall call) {
-        this.setAllowedApps(call);
+        try {
+            JSArray appsArray = call.getArray("apps");
+            Set<String> apps = new HashSet<>();
+            for (int i = 0; i < appsArray.length(); i++) {
+                apps.add(appsArray.getString(i));
+            }
+            preferences.setBlockedApps(apps);
+            com.mylifeos.app.shield.core.ForegroundGuardService.forceSync(getContext());
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to update block list", e);
+        }
+    }
+
+    @PluginMethod
+    public void scheduleTimedLock(PluginCall call) {
+        try {
+            JSArray lock = call.getArray("lockApps", new JSArray());
+            JSArray user = call.getArray("userApps", new JSArray());
+            JSArray windows = call.getArray("windows", new JSArray());
+            com.mylifeos.app.shield.core.ShieldLockScheduler.save(getContext(), lock, user, windows);
+            JSObject ret = new JSObject();
+            ret.put("active", com.mylifeos.app.shield.core.ShieldLockScheduler.isActive(getContext()));
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to schedule lock", e);
+        }
+    }
+
+    @PluginMethod
+    public void clearTimedLock(PluginCall call) {
+        com.mylifeos.app.shield.core.ShieldLockScheduler.clear(getContext());
+        call.resolve();
     }
 
     @PluginMethod
@@ -257,53 +235,18 @@ public class ShieldPlugin extends Plugin {
         }
     }
 
-    // rest of file unchanged from original.
-    @PluginMethod
-    public void activateFocusMode(PluginCall call) {
-        modeManager.activateFocusMode();
-        call.resolve();
-    }
-
-    @PluginMethod
-    public void activateSleepMode(PluginCall call) {
-        modeManager.activateSleepMode();
-        call.resolve();
-    }
-
-    @PluginMethod
-    public void activateStrictMode(PluginCall call) {
-        modeManager.activateStrictMode();
-        call.resolve();
-    }
-
-    @PluginMethod
-    public void deactivateMode(PluginCall call) {
-        if (modeManager.isStrictMode() && !preferences.isBypassActive()) {
-            call.reject("Strict mode is active!");
-            return;
-        }
-        modeManager.deactivateMode();
-        call.resolve();
-    }
-
-    @PluginMethod
-    public void setEscalationBase(PluginCall call) {
-        Integer minutes = call.getInt("minutes");
-        if (minutes == null) {
-            call.reject("Must provide minutes");
-            return;
-        }
-        boolean updated = new com.mylifeos.app.shield.ShieldEscalationManager(getContext())
-                .setBaseMinutes(minutes);
-        JSObject ret = new JSObject();
-        ret.put("success", updated);
-        call.resolve(ret);
-    }
+    // ==========================================
+    // 💬 TELEGRAM GUARD
+    // ==========================================
+    private static final String[] TELEGRAM_OPTION_KEYS = new String[]{
+        "enabled", "blockChats", "blockSearch", "blockInviteLinks",
+        "blockAllInvites", "blockMedia", "blockAllMedia"
+    };
 
     @PluginMethod
     public void getTelegramGuard(PluginCall call) {
         JSObject ret = new JSObject();
-        for (String key : ShieldPreferences.TELEGRAM_GUARD_KEYS) {
+        for (String key : TELEGRAM_OPTION_KEYS) {
             ret.put(key, preferences.getTelegramGuardOption(key));
         }
         call.resolve(ret);
@@ -312,13 +255,13 @@ public class ShieldPlugin extends Plugin {
     @PluginMethod
     public void setTelegramGuard(PluginCall call) {
         try {
-            for (String key : ShieldPreferences.TELEGRAM_GUARD_KEYS) {
+            for (String key : TELEGRAM_OPTION_KEYS) {
                 Boolean value = call.getBoolean(key);
                 if (value != null) preferences.setTelegramGuardOption(key, value);
             }
             com.mylifeos.app.shield.ShieldAccessibilityService.refreshContentConfiguration();
             JSObject ret = new JSObject();
-            for (String key : ShieldPreferences.TELEGRAM_GUARD_KEYS) {
+            for (String key : TELEGRAM_OPTION_KEYS) {
                 ret.put(key, preferences.getTelegramGuardOption(key));
             }
             call.resolve(ret);
@@ -327,6 +270,9 @@ public class ShieldPlugin extends Plugin {
         }
     }
 
+    // ==========================================
+    // 🌐 ADULT FILTER & VPN
+    // ==========================================
     private void setPrivateDns() {
         try {
             DevicePolicyManager dpm = (DevicePolicyManager)
@@ -335,7 +281,7 @@ public class ShieldPlugin extends Plugin {
                 getContext(), ShieldDeviceAdminReceiver.class);
 
             if (dpm.isAdminActive(admin)) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                if (false && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     dpm.setGlobalSetting(admin, "private_dns_mode", "hostname");
                     dpm.setGlobalSetting(admin, "private_dns_specifier", "family.cloudflare-dns.com");
                     Log.d("ShieldPlugin", "✅ Private DNS set — Android 10+");
@@ -395,15 +341,219 @@ public class ShieldPlugin extends Plugin {
         }
     }
 
+    // ==========================================
+    // 🎨 ADULT FILTER — BLOCK SCREEN STYLE
+    // ইউজার AdultFilterPage থেকে যে style select করে সেটা save হয়
+    // ShieldBlockActivity এই pref পড়ে সঠিক UI দেখাবে
+    // ==========================================
+    @PluginMethod
+    public void updateAdultFilterScreen(PluginCall call) {
+        try {
+            String style = call.getString("style", "focus");
+            String customMessage = call.getString("customMessage", "");
+
+            preferences.setAdultBlockScreenStyle(style);
+            preferences.setAdultBlockCustomMessage(customMessage);
+
+            Log.d("ShieldPlugin", "✅ Adult block screen style saved: " + style);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to save adult filter screen style", e);
+        }
+    }
+
+    // AdultFilterPage load হলে saved style ফেরত দেয়
+    @PluginMethod
+    public void getAdultFilterScreen(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("style", preferences.getAdultBlockScreenStyle());
+        ret.put("customMessage", preferences.getAdultBlockCustomMessage());
+        call.resolve(ret);
+    }
+
+    // [SHIELD-CARD] Block Screen Style page -> native block card
+    @PluginMethod
+    public void updateBlockScreenOptions(PluginCall call) {
+        try {
+            Boolean countdown = call.getBoolean("countdown");
+            if (countdown != null) preferences.setBlockCountdownEnabled(countdown);
+            String theme = call.getString("theme");
+            if (theme != null) preferences.setBlockScreenTheme(theme);
+            String text = call.getString("text");
+            if (text != null) preferences.setBlockScreenText(text);
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject(e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void getBlockScreenOptions(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("countdown", preferences.isBlockCountdownEnabled());
+        ret.put("theme", preferences.getBlockScreenTheme());
+        ret.put("text", preferences.getBlockScreenText());
+        call.resolve(ret);
+    }
+
+    // ==========================================
+    // ⚙️ SETTINGS & PROTECTION
+    // ==========================================
+    @PluginMethod
+    public void updateHardcoreSettings(PluginCall call) {
+        try {
+            String key = call.getString("key");
+            boolean value = call.getBoolean("value", false);
+
+            if (key == null) {
+                call.reject("Must provide a key");
+                return;
+            }
+
+            switch (key) {
+                case "blockSplitScreen":
+                    preferences.setBlockSplitScreen(value);
+                    break;
+                case "blockPowerOff":
+                    preferences.setBlockPowerOff(value);
+                    break;
+                case "blockRecentApps":
+                    preferences.setBlockRecentApps(value);
+                    break;
+                case "preventUninstall":
+                    preferences.setPreventUninstall(value);
+                    break;
+                case "blockReels":
+                    preferences.setReelsBlockEnabled(value);
+                    break;
+                case "blockAdult":
+                    preferences.setAdultFilterEnabled(value);
+                    break;
+                default:
+                    call.reject("Unknown settings key: " + key);
+                    return;
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+
+        } catch (Exception e) {
+            call.reject("Error updating hardcore settings", e);
+        }
+    }
+
+    @PluginMethod
+    public void updateNotificationSettings(PluginCall call) {
+        String key = call.getString("key");
+        if (key == null) {
+            call.reject("Key cannot be null");
+            return;
+        }
+        boolean value = call.getBoolean("value", false);
+        if ("vibrate".equals(key)) preferences.setVibrationEnabled(value);
+        else if ("sound".equals(key)) preferences.setSoundEnabled(value);
+        else if ("lowTimeAlert".equals(key)) preferences.setLowTimeAlert(value);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearHistory(PluginCall call) {
+        try {
+            preferences.clearHistory();
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Failed to clear history", e);
+        }
+    }
+
+    @PluginMethod
+    public void requestUninstall(PluginCall call) {
+        Context context = getContext();
+
+        if (preferences.isStrictMode() && !preferences.isBypassActive()) {
+            call.reject("Cannot uninstall while Strict Mode is active!");
+            return;
+        }
+
+        DevicePolicyManager dpm = (DevicePolicyManager)
+            context.getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName adminComponent = new ComponentName(
+            context, ShieldDeviceAdminReceiver.class);
+
+        if (dpm.isAdminActive(adminComponent)) {
+            dpm.removeActiveAdmin(adminComponent);
+        }
+
+        Intent intent = new Intent(Intent.ACTION_DELETE);
+        intent.setData(Uri.parse("package:" + context.getPackageName()));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        context.startActivity(intent);
+
+        call.resolve();
+    }
+
+    // ==========================================
+    // 🔑 EMERGENCY BYPASS
+    // ==========================================
+    @PluginMethod
+    public void setEmergencyPin(PluginCall call) {
+        String pin = call.getString("pin");
+        if (pin == null || pin.length() < 4) {
+            call.reject("PIN must be at least 4 digits");
+            return;
+        }
+        preferences.setEmergencyPin(pin);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void triggerEmergencyBypass(PluginCall call) {
+        String inputPin = call.getString("pin");
+        String savedPin = preferences.getEmergencyPin();
+
+        if (savedPin.isEmpty()) {
+            call.reject("No Emergency PIN set!");
+            return;
+        }
+
+        if (savedPin.equals(inputPin)) {
+            preferences.setStrictMode(false);
+            preferences.setEnabled(false);
+            preferences.setPreventUninstall(false);
+            preferences.setBypassActive(true);
+            preferences.setCurrentMode("normal");
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } else {
+            call.reject("Incorrect Emergency PIN!");
+        }
+    }
+
+    // ==========================================
+    // 📊 DATA & STATS
+    // ==========================================
     @PluginMethod
     public void getInstalledApps(PluginCall call) {
         try {
             PackageManager pm = getContext().getPackageManager();
             Intent launcherIntent = new Intent(Intent.ACTION_MAIN, null);
             launcherIntent.addCategory(Intent.CATEGORY_LAUNCHER);
-            List<android.content.pm.ResolveInfo> resolved = pm.queryIntentActivities(launcherIntent, 0);
+            List<android.content.pm.ResolveInfo> resolved =
+                pm.queryIntentActivities(launcherIntent, 0);
 
+            // Icons are heavy — allow the JS side to opt out (default: include).
             boolean withIcons = call.getBoolean("icons", Boolean.TRUE);
+
             JSArray apps = new JSArray();
             String myPkg = getContext().getPackageName();
             for (android.content.pm.ResolveInfo ri : resolved) {
@@ -435,12 +585,13 @@ public class ShieldPlugin extends Plugin {
         }
     }
 
+    /** Render a launcher icon into a small base64 PNG data-URL for the web UI. */
     private String encodeAppIcon(PackageManager pm, android.content.pm.ResolveInfo ri) {
         try {
             android.graphics.drawable.Drawable d = ri.loadIcon(pm);
             if (d == null) return null;
 
-            int size = 96;
+            int size = 96; // px — enough for a 40dp list icon on xxhdpi
             android.graphics.Bitmap bmp = android.graphics.Bitmap.createBitmap(
                 size, size, android.graphics.Bitmap.Config.ARGB_8888);
             android.graphics.Canvas canvas = new android.graphics.Canvas(bmp);
@@ -450,11 +601,14 @@ public class ShieldPlugin extends Plugin {
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
             bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, out);
             bmp.recycle();
-            return "data:image/png;base64," + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP);
+            return "data:image/png;base64,"
+                + android.util.Base64.encodeToString(out.toByteArray(), android.util.Base64.NO_WRAP);
         } catch (Throwable t) {
             return null;
         }
     }
+
+
 
     @PluginMethod
     public void getBlockStats(PluginCall call) {
@@ -536,6 +690,383 @@ public class ShieldPlugin extends Plugin {
 
         } catch (Exception e) {
             call.reject("Failed to get screen time stats", e);
+        }
+    }
+
+    // ==========================================
+    // ✨ LIGHT ORB TIMER (foreground, session-driven)
+    // ==========================================
+
+    /** Starts/stops the orb overlay itself (independent of whether a session is running). */
+    @PluginMethod
+    public void toggleFloatingTimer(PluginCall call) {
+        boolean enable = call.getBoolean("enable", false);
+        preferences.setFloatingTimerEnabled(enable);
+
+        if (enable) {
+            if (!permissionHelper.hasOverlayPermission()) {
+                call.reject("OVERLAY_PERMISSION_REQUIRED");
+                return;
+            }
+            startOrb(ShieldFloatingService.ACTION_REFRESH, 0);
+        } else {
+            getContext().stopService(new Intent(getContext(), ShieldFloatingService.class));
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void updateFloatingTimerStyle(PluginCall call) {
+        if (call.hasOption("opacity"))
+            preferences.setFloatingTimerOpacity(call.getFloat("opacity", 1.0f));
+        if (call.hasOption("size"))
+            preferences.setOrbSize(call.getInt("size", 64));
+        if (call.hasOption("countdown"))
+            preferences.setCountdownMode(call.getBoolean("countdown", false));
+        if (call.hasOption("showSeconds"))
+            preferences.setOrbShowSeconds(call.getBoolean("showSeconds", true));
+        if (call.hasOption("pulse"))
+            preferences.setOrbPulseEnabled(call.getBoolean("pulse", true));
+        if (call.hasOption("x") && call.hasOption("y"))
+            preferences.setTimerPosition(call.getInt("x", 0), call.getInt("y", 100));
+
+        if (preferences.isFloatingTimerEnabled()) {
+            startOrb(ShieldFloatingService.ACTION_REFRESH, 0);
+        }
+        call.resolve();
+    }
+
+    /** Starts a real focus session; the orb renders it and survives backgrounding. */
+    @PluginMethod
+    public void startFocusSession(PluginCall call) {
+        int minutes = call.getInt("minutes", 0);
+        if (minutes <= 0) {
+            call.reject("minutes must be > 0");
+            return;
+        }
+        preferences.startFocusSession(minutes);
+        if (preferences.isFloatingTimerEnabled() && permissionHelper.hasOverlayPermission()) {
+            startOrb(ShieldFloatingService.ACTION_START, minutes);
+        }
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void pauseFocusSession(PluginCall call) {
+        preferences.pauseFocusSession();
+        startOrbIfVisible(ShieldFloatingService.ACTION_PAUSE, 0);
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void resumeFocusSession(PluginCall call) {
+        preferences.resumeFocusSession();
+        startOrbIfVisible(ShieldFloatingService.ACTION_RESUME, 0);
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void addFocusMinutes(PluginCall call) {
+        int minutes = call.getInt("minutes", 5);
+        preferences.addFocusMinutes(minutes);
+        startOrbIfVisible(ShieldFloatingService.ACTION_ADD, minutes);
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void stopFocusSession(PluginCall call) {
+        preferences.stopFocusSession();
+        getContext().stopService(new Intent(getContext(), ShieldFloatingService.class));
+        call.resolve(sessionState());
+    }
+
+    @PluginMethod
+    public void getFocusSession(PluginCall call) {
+        call.resolve(sessionState());
+    }
+
+    private JSObject sessionState() {
+        JSObject ret = new JSObject();
+        ret.put("active", preferences.hasFocusSession());
+        ret.put("paused", preferences.isFocusSessionPaused());
+        ret.put("remainingMs", preferences.getFocusRemainingMs());
+        ret.put("orbEnabled", preferences.isFloatingTimerEnabled());
+        return ret;
+    }
+
+    private void startOrbIfVisible(String action, int minutes) {
+        if (preferences.isFloatingTimerEnabled() && permissionHelper.hasOverlayPermission()) {
+            startOrb(action, minutes);
+        }
+    }
+
+    private void startOrb(String action, int minutes) {
+        try {
+            Intent i = new Intent(getContext(), ShieldFloatingService.class);
+            i.setAction(action);
+            if (minutes > 0) i.putExtra(ShieldFloatingService.EXTRA_MINUTES, minutes);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(i);
+            } else {
+                getContext().startService(i);
+            }
+        } catch (Throwable t) {
+            Log.e("ShieldPlugin", "Failed to start orb service", t);
+        }
+    }
+
+    // ==========================================
+    // ⏱️ DAILY APP LIMITS (real enforcement)
+    // ==========================================
+    @PluginMethod
+    public void setAppLimit(PluginCall call) {
+        String pkg = call.getString("packageName");
+        if (pkg == null || pkg.isEmpty()) {
+            call.reject("packageName required");
+            return;
+        }
+        if (!permissionHelper.hasUsageStatsPermission()) {
+            call.reject("USAGE_STATS_PERMISSION_REQUIRED");
+            return;
+        }
+        preferences.setAppLimit(pkg, call.getInt("minutes", 0));
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getAppLimits(PluginCall call) {
+        JSObject limits = new JSObject();
+        java.util.Map<String, Integer> map = preferences.getTimeLimits();
+        com.mylifeos.app.shield.ShieldTimerManager tm =
+            new com.mylifeos.app.shield.ShieldTimerManager(getContext());
+        JSObject used = new JSObject();
+        for (java.util.Map.Entry<String, Integer> e : map.entrySet()) {
+            limits.put(e.getKey(), e.getValue());
+            used.put(e.getKey(), tm.getTodayUsageMinutes(e.getKey()));
+        }
+        JSObject ret = new JSObject();
+        ret.put("limits", limits);
+        ret.put("usedMinutes", used);
+        call.resolve(ret);
+    }
+
+    // ==========================================
+    // 🔒 APP LOCK (PIN + device biometric)
+    // ==========================================
+    @PluginMethod
+    public void getAppLockStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("enabled", preferences.isAppLockEnabled());
+        ret.put("hasPin", preferences.hasAppLockPin());
+        ret.put("biometric", preferences.isAppLockBiometricEnabled());
+        ret.put("biometricAvailable", isBiometricAvailable());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void setAppLock(PluginCall call) {
+        boolean enabled = call.getBoolean("enabled", false);
+        String pin = call.getString("pin");
+
+        if (enabled) {
+            if (pin != null && pin.length() >= 4) {
+                preferences.setAppLockPin(pin);
+            } else if (!preferences.hasAppLockPin()) {
+                call.reject("PIN_REQUIRED");
+                return;
+            }
+        }
+        preferences.setAppLockEnabled(enabled);
+        if (call.hasOption("biometric")) {
+            preferences.setAppLockBiometricEnabled(call.getBoolean("biometric", true));
+        }
+        if (!enabled) preferences.clearAppLockPin();
+
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void verifyAppLockPin(PluginCall call) {
+        String pin = call.getString("pin", "");
+        JSObject ret = new JSObject();
+        ret.put("valid", preferences.verifyAppLockPin(pin));
+        call.resolve(ret);
+    }
+
+    /** Device biometric / credential prompt. Resolves { authenticated: boolean }. */
+    @PluginMethod
+    public void authenticateBiometric(final PluginCall call) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P || getActivity() == null) {
+            call.reject("BIOMETRIC_UNAVAILABLE");
+            return;
+        }
+        try {
+            new Handler(Looper.getMainLooper()).post(() -> {
+                android.hardware.biometrics.BiometricPrompt.Builder b =
+                    new android.hardware.biometrics.BiometricPrompt.Builder(getContext())
+                        .setTitle("Unlock Focus Shield")
+                        .setDescription("Confirm it's you to open Shield settings");
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    b.setAllowedAuthenticators(
+                        android.hardware.biometrics.BiometricManager.Authenticators.BIOMETRIC_WEAK
+                            | android.hardware.biometrics.BiometricManager.Authenticators.DEVICE_CREDENTIAL);
+                } else {
+                    b.setNegativeButton("Use PIN", getContext().getMainExecutor(),
+                        (dialog, which) -> resolveAuth(call, false));
+                }
+
+                b.build().authenticate(
+                    new android.os.CancellationSignal(),
+                    getContext().getMainExecutor(),
+                    new android.hardware.biometrics.BiometricPrompt.AuthenticationCallback() {
+                        @Override public void onAuthenticationSucceeded(
+                            android.hardware.biometrics.BiometricPrompt.AuthenticationResult result) {
+                            resolveAuth(call, true);
+                        }
+                        @Override public void onAuthenticationError(int code, CharSequence msg) {
+                            resolveAuth(call, false);
+                        }
+                    });
+            });
+        } catch (Throwable t) {
+            // PluginCall.reject has no (String, Throwable) overload — pass the message instead.
+            call.reject("BIOMETRIC_FAILED: " + t.getMessage());
+        }
+    }
+
+    private void resolveAuth(PluginCall call, boolean ok) {
+        if (call.isReleased()) return;
+        JSObject ret = new JSObject();
+        ret.put("authenticated", ok);
+        call.resolve(ret);
+    }
+
+    private boolean isBiometricAvailable() {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return false;
+            android.hardware.biometrics.BiometricManager bm =
+                (android.hardware.biometrics.BiometricManager)
+                    getContext().getSystemService(Context.BIOMETRIC_SERVICE);
+            return bm != null && bm.canAuthenticate()
+                == android.hardware.biometrics.BiometricManager.BIOMETRIC_SUCCESS;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    // ==========================================
+    // 🌅 DAY BOUNDARY / GENERAL PREFS
+    // ==========================================
+    @PluginMethod
+    public void setDayBoundary(PluginCall call) {
+        if (call.hasOption("startHour")) {
+            preferences.setStartOfDayHour(call.getInt("startHour", 0));
+        }
+        if (call.hasOption("autoReset")) {
+            preferences.setAutoResetDailyEnabled(call.getBoolean("autoReset", true));
+        }
+        JSObject ret = new JSObject();
+        ret.put("startHour", preferences.getStartOfDayHour());
+        ret.put("autoReset", preferences.isAutoResetDailyEnabled());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getDayBoundary(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("startHour", preferences.getStartOfDayHour());
+        ret.put("autoReset", preferences.isAutoResetDailyEnabled());
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void getNotificationSettings(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("vibrate", preferences.isVibrationEnabled());
+        ret.put("sound", preferences.isSoundEnabled());
+        ret.put("lowTimeAlert", preferences.isLowTimeAlertEnabled());
+        call.resolve(ret);
+    }
+
+
+
+    // ==========================================
+    // 🔐 PERMISSIONS
+    // ==========================================
+    @PluginMethod
+    public void checkPermissions(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("accessibility", permissionHelper.hasAccessibilityPermission());
+        ret.put("usageStats", permissionHelper.hasUsageStatsPermission());
+        ret.put("overlay", permissionHelper.hasOverlayPermission());
+        ret.put("battery", true);
+
+        // Device Admin check
+        DevicePolicyManager dpm = (DevicePolicyManager)
+            getContext().getSystemService(Context.DEVICE_POLICY_SERVICE);
+        ComponentName admin = new ComponentName(getContext(), ShieldDeviceAdminReceiver.class);
+        ret.put("deviceAdmin", dpm.isAdminActive(admin));
+
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestAccessibility(PluginCall call) {
+        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(intent);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestUsageStats(PluginCall call) {
+        Intent intent = new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(intent);
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestOverlay(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestBattery(PluginCall call) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+        }
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void requestDeviceAdmin(PluginCall call) {
+        try {
+            ComponentName adminComponent = new ComponentName(
+                getContext(), ShieldDeviceAdminReceiver.class);
+            Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+            intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent);
+            intent.putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                "Shield needs Device Admin to set DNS filter and prevent uninstall.");
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("Failed to open Device Admin settings", e);
         }
     }
 }

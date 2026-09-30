@@ -74,11 +74,14 @@ public class MainActivity extends BridgeActivity {
     if (alarmLaunch) {
       try { setTheme(R.style.AppTheme_AlarmLaunch); } catch (Throwable ignored) {}
     }
+    try { com.mylifeos.app.LifeLog.init(this); com.mylifeos.app.LifeLog.i("App", "MainActivity.onCreate"); } catch (Throwable ignored) {}
+    try { registerPlugin(com.mylifeos.app.plugins.LifeLogPlugin.class); } catch (Throwable t) { Log.e("MainActivity", "LifeLogPlugin register failed", t); }
     try { registerPlugin(ShieldPlugin.class); } catch (Throwable t) { Log.e("MainActivity", "ShieldPlugin register failed", t); }
     try { registerPlugin(RiseAlarmPlugin.class); } catch (Throwable t) { Log.e("MainActivity", "RiseAlarmPlugin register failed", t); }
     try { registerPlugin(PureShieldPlugin.class); } catch (Throwable t) { Log.e("MainActivity", "PureShieldPlugin register failed", t); }
     try { registerPlugin(BarcodeScannerPlugin.class); } catch (Throwable t) { Log.e("MainActivity", "BarcodeScannerPlugin register failed", t); }
     try { registerPlugin(NativeRingtonePickerPlugin.class); } catch (Throwable t) { Log.e("MainActivity", "NativeRingtonePickerPlugin register failed", t); }
+    try { registerPlugin(com.mylifeos.app.nighttorise.NightToRisePlugin.class); } catch (Throwable t) { Log.e("MainActivity", "NightToRisePlugin register failed", t); }
     try { registerPlugin(PhotoPickerPlugin.class); } catch (Throwable t) { Log.e("MainActivity", "PhotoPickerPlugin register failed", t); }
     try { registerPlugin(AppUpdatePlugin.class); } catch (Throwable t) { Log.e("MainActivity", "AppUpdatePlugin register failed", t); }
     super.onCreate(savedInstanceState);

@@ -21,6 +21,7 @@ import androidx.core.app.NotificationCompat;
 
 import com.mylifeos.app.MainActivity;
 import com.mylifeos.app.R;
+import com.mylifeos.app.nighttorise.NightToRiseManager;
 import com.mylifeos.app.shield.ShieldPreferences;
 
 import java.text.SimpleDateFormat;
@@ -28,10 +29,32 @@ import java.util.Date;
 import java.util.Locale;
 import java.util.Set;
 
+/**
+ * ForegroundGuardService — the reliability layer behind app blocking.
+ *
+ * FIX (guard-stop): the service never stopped itself when a lock window ended
+ * mid-session. sync() only started/stopped based on whether N2R is *enabled*
+ * (the feature toggle), not whether a lock is *currently active*. So after
+ * Sleep Guard ended at the alarm, the service kept running and kept showing
+ * the block screen on every app switch.
+ *
+ * FIX (rise-only notification): notification was always showing "sleep lock
+ * ACTIVE" even during Rise Guard because it used a hardcoded label instead
+ * of reading probe.phase.
+ */
 public class ForegroundGuardService extends Service {
+
     private static final String TAG = "ForegroundGuard";
     private static final String CHANNEL_ID = "shield_guard_status";
     private static final int NOTIF_ID = 4711;
+    /**
+     * SAFETY-CRITICAL (device reboot): every poll tick hits system_server
+     * (UsageStatsService + AppOps). At a fixed 1s all night, plus a second
+     * 2-minute-range queryEvents, that sustained binder load was the last
+     * remaining watchdog trigger. Poll is now adaptive: fast only while the
+     * screen is on AND a lock is active, slow otherwise, and paused while
+     * the screen is off (nothing can be opened then).
+     */
     private static final long POLL_FAST_MS = 1500L;
     private static final long POLL_IDLE_MS = 10_000L;
     private static final long POLL_SCREEN_OFF_MS = 60_000L;
@@ -45,30 +68,56 @@ public class ForegroundGuardService extends Service {
     private long a11yPermAt = 0L;
     private long lastQueryEnd = 0L;
     private String lastKnownPkg = null;
+
     private static final String PROBE_PACKAGE = "zz.lifeos.lock.probe";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Runnable tick;
     private String lastNotificationText = null;
+
+    /**
+     * SAFETY-CRITICAL (device reboot): sync() was called from
+     * onAccessibilityEvent, i.e. several times per second while the user
+     * scrolls or switches apps. Each call issued a
+     * startForegroundService()/stopService() binder transaction to
+     * ActivityManager in system_server, and each one also re-read
+     * SharedPreferences. On OEM ROMs that flood of service-start transactions
+     * trips the system_server watchdog, which restarts system_server — on the
+     * device this looks exactly like the phone rebooting on its own.
+     *
+     * sync() is now idempotent and cheap: it starts/stops only on a real state
+     * change, and never more than once every SYNC_MIN_INTERVAL_MS.
+     */
     private static final long SYNC_MIN_INTERVAL_MS = 5000L;
     private static volatile long lastSyncAt = 0L;
     private static volatile Boolean lastSyncNeeded = null;
+    /** True between onCreate and onDestroy of the running instance. */
     private static volatile boolean running = false;
 
-    public static void forceSync(Context ctx) {
+    /**
+     * Explicit, user-driven state change (settings saved, alarm changed, boot):
+     * bypass the rate limit so the guard starts/stops immediately.
+     */
+    public static synchronized void forceSync(Context ctx) {
         lastSyncAt = 0L;
         lastSyncNeeded = null;
+        com.mylifeos.app.nighttorise.NightToRiseManager.invalidateSafetyCache();
         sync(ctx);
     }
 
-    public static void sync(Context ctx) {
+    public static synchronized void sync(Context ctx) {
         long now = android.os.SystemClock.elapsedRealtime();
         if (lastSyncNeeded != null && now - lastSyncAt < SYNC_MIN_INTERVAL_MS) return;
         try {
-            Set<String> allowed = new ShieldPreferences(ctx).getAllowedApps();
-            boolean needed = (allowed != null && !allowed.isEmpty()) || SleepToRise.isEnabled(ctx);
+            com.mylifeos.app.nighttorise.NightToRisePreferences n2rPrefs =
+                new com.mylifeos.app.nighttorise.NightToRisePreferences(ctx);
+            boolean n2rOn = n2rPrefs.isEnabled();
+            Set<String> blocked = new ShieldPreferences(ctx).getBlockedApps();
+            boolean shieldOn = blocked != null && !blocked.isEmpty();
+            boolean needed = n2rOn || shieldOn;
             lastSyncAt = now;
 
+            // Nothing to do: desired state already matches reality.
             if (lastSyncNeeded != null && lastSyncNeeded == needed && running == needed) return;
             lastSyncNeeded = needed;
 
@@ -82,7 +131,7 @@ public class ForegroundGuardService extends Service {
                 ctx.stopService(i);
             }
         } catch (Throwable t) {
-            Log.w(TAG, "sync failed", t);
+            com.mylifeos.app.LifeLog.w2(TAG, "sync failed", t);
         }
     }
 
@@ -91,7 +140,22 @@ public class ForegroundGuardService extends Service {
         super.onCreate();
         running = true;
         createChannel();
-        startForeground(NOTIF_ID, buildNotification("Protection active", "Checking your lock schedule…"));
+        // SAFETY: on Android 12+ startForeground can throw (background-start
+        // restrictions). Uncaught, START_STICKY would crash-loop the service,
+        // which some OEM ROMs escalate into a system restart. Fail soft instead.
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NOTIF_ID, buildNotification("Protection active", "Checking your lock schedule…"),
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            } else {
+                startForeground(NOTIF_ID, buildNotification("Protection active", "Checking your lock schedule…"));
+            }
+        } catch (Throwable t) {
+            com.mylifeos.app.LifeLog.w2(TAG, "startForeground rejected; stopping cleanly", t);
+            running = false;
+            stopSelf();
+            return;
+        }
         try {
             android.os.PowerManager pm = (android.os.PowerManager) getSystemService(Context.POWER_SERVICE);
             if (pm != null) screenOn = pm.isInteractive();
@@ -101,7 +165,7 @@ public class ForegroundGuardService extends Service {
                 screenOn = !Intent.ACTION_SCREEN_OFF.equals(in.getAction());
                 if (screenOn && tick != null) {
                     handler.removeCallbacks(tick);
-                    handler.post(tick);
+                    handler.postDelayed(tick, 1000);
                 }
             }
         };
@@ -115,11 +179,11 @@ public class ForegroundGuardService extends Service {
         tick = new Runnable() {
             @Override public void run() {
                 nextDelay = POLL_IDLE_MS;
-                try { pass(); } catch (Throwable t) { Log.w(TAG, "guard pass failed", t); }
+                try { pass(); } catch (Throwable t) { com.mylifeos.app.LifeLog.w2(TAG, "guard pass failed", t); }
                 handler.postDelayed(this, screenOn ? nextDelay : POLL_SCREEN_OFF_MS);
             }
         };
-        handler.post(tick);
+        handler.postDelayed(tick, 1000);
     }
 
     @Override
@@ -143,40 +207,45 @@ public class ForegroundGuardService extends Service {
     public IBinder onBind(Intent intent) { return null; }
 
     private void pass() {
+        NightToRiseManager n2r = NightToRiseManager.get(this);
+        NightToRiseManager.Decision probe = n2r.decide(System.currentTimeMillis(), PROBE_PACKAGE);
+        if (probe.shouldBlock) nextDelay = POLL_FAST_MS;
+        // Screen off: no app can be opened, so skip all system_server queries.
         String pkg = screenOn ? currentForegroundPackage() : lastKnownPkg;
 
-        boolean accessibilityAvailable = com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()
+        boolean accessibilityAvailable =
+            com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()
             || hasA11yPermCached();
 
-        int allowedCount = 0;
+        BlockEnforcer.noteGuardPass(probe.phase.name(), probe.shouldBlock, pkg,
+            hasUsageAccess(), accessibilityAvailable);
+
+        // Announce guard start / end / timer completion to the user.
+        com.mylifeos.app.nighttorise.GuardTransitionNotifier.onDecision(this, probe);
+
+        // FIX: when nothing is actively locking AND Shield has no blocked apps
+        // AND N2R feature is off — stop so Sleep Guard auto-releases correctly.
+        boolean shieldHasBlocked = false;
         try {
-            Set<String> allowedApps = new ShieldPreferences(this).getAllowedApps();
-            allowedCount = allowedApps == null ? 0 : allowedApps.size();
+            Set<String> blockedApps = new ShieldPreferences(this).getBlockedApps();
+            shieldHasBlocked = blockedApps != null && !blockedApps.isEmpty();
         } catch (Throwable ignored) {}
 
-        boolean sleepEnabled = SleepToRise.isEnabled(this);
-        boolean sleepLocking = sleepEnabled && SleepToRise.isLocking(this);
-
-        BlockEnforcer.noteGuardPass(sleepLocking ? "SLEEP_TO_RISE" : "SHIELD",
-            allowedCount > 0 || sleepLocking, pkg, hasUsageAccess(), accessibilityAvailable);
-
-        if (allowedCount == 0 && !sleepEnabled) {
+        if (shieldHasBlocked) nextDelay = POLL_FAST_MS;
+        if (!probe.shouldBlock && !shieldHasBlocked && !n2r.prefs().isEnabled()) {
             stopSelf();
             return;
         }
-        if (allowedCount == 0 && !sleepLocking) {
-            // Sleep to Rise waiting for its window: poll slowly, block nothing.
-            updateNotification(0, true);
+
+        updateNotification(probe, pkg != null && canLeaveApp());
+
+        if (com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()) { return; }
+        if (pkg == null) {
+            if (probe.shouldBlock) com.mylifeos.app.LifeLog.w2(TAG, "Lock active but no foreground-app signal available");
             return;
         }
-        nextDelay = POLL_FAST_MS;
-
-        updateNotification(Math.max(1, allowedCount), pkg != null && canLeaveApp());
-
-        if (pkg == null) return;
         BlockEnforcer.enforce(this, pkg, this::goHome);
     }
-
 
     private boolean canLeaveApp() {
         if (com.mylifeos.app.shield.ShieldAccessibilityService.isConnected()) return true;
@@ -190,13 +259,14 @@ public class ForegroundGuardService extends Service {
 
     private void goHome() {
         if (com.mylifeos.app.shield.ShieldAccessibilityService.goHomeViaAccessibility()) return;
+        if (!GlobalActionGovernor.allow(this, "home")) return;
         try {
             Intent home = new Intent(Intent.ACTION_MAIN);
             home.addCategory(Intent.CATEGORY_HOME);
             home.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
             startActivity(home);
         } catch (Throwable t) {
-            Log.w(TAG, "goHome intent rejected", t);
+            com.mylifeos.app.LifeLog.w2(TAG, "goHome intent rejected", t);
         }
     }
 
@@ -210,6 +280,11 @@ public class ForegroundGuardService extends Service {
         return cachedA11yPerm;
     }
 
+    /**
+     * Incremental: only asks UsageStats for events since the previous query,
+     * so each call covers ~1-10s instead of repeatedly re-reading 10s + 2min
+     * windows. One small binder call per tick, at most.
+     */
     private String currentForegroundPackage() {
         if (hasUsageAccess()) {
             long now = System.currentTimeMillis();
@@ -241,7 +316,7 @@ public class ForegroundGuardService extends Service {
             }
             return last;
         } catch (Throwable t) {
-            Log.w(TAG, "usage query failed", t);
+            com.mylifeos.app.LifeLog.w2(TAG, "usage query failed", t);
             return null;
         }
     }
@@ -272,19 +347,40 @@ public class ForegroundGuardService extends Service {
         }
     }
 
-    private void updateNotification(int allowedCount, boolean canEnforce) {
+    private void updateNotification(NightToRiseManager.Decision probe, boolean canEnforce) {
         String title;
         String text;
 
-        if (allowedCount > 0 && !canEnforce) {
-            title = "Shield — permission needed";
-            text = "Grant Usage Access or Accessibility to enforce blocking";
-        } else if (allowedCount > 0) {
-            title = "Shield protection active";
-            text = allowedCount + " app" + (allowedCount == 1 ? "" : "s") + " allowed right now";
+        boolean locking = probe.shouldBlock;
+        if (locking && !canEnforce) {
+            title = "Sleep to Rise — permission needed";
+            text = "Grant Usage Access or Accessibility to enforce this lock";
+        } else if (locking) {
+            String until = probe.endTimeMs > 0
+                ? new SimpleDateFormat("h:mm a", Locale.getDefault()).format(new Date(probe.endTimeMs))
+                : null;
+            // FIX: read actual phase, not hardcoded "sleep lock"
+            boolean isRise = probe.phase == NightToRiseManager.Phase.RISE_LOCK;
+            title = isRise
+                ? "🌅 Sleep to Rise — rise lock ACTIVE"
+                : "🌙 Sleep to Rise — sleep lock ACTIVE";
+            text = "Only your allowed apps can open"
+                + (until != null ? " · until " + until : "");
         } else {
-            title = "Shield protection running";
-            text = "No app allowlist is active";
+            int blockedCount = 0;
+            try {
+                Set<String> blocked = new ShieldPreferences(this).getBlockedApps();
+                blockedCount = blocked == null ? 0 : blocked.size();
+            } catch (Throwable ignored) {}
+            switch (probe.phase) {
+                case PAUSED:       title = "Sleep to Rise — paused tonight"; break;
+                case INACTIVE_DAY: title = "Sleep to Rise — not scheduled today"; break;
+                case OFF:          title = "Shield protection running"; break;
+                default:           title = "Sleep to Rise — armed"; break;
+            }
+            text = blockedCount > 0
+                ? blockedCount + " app" + (blockedCount == 1 ? "" : "s") + " blocked by Shield"
+                : "Lock is not enforcing right now";
         }
 
         String signature = title + "|" + text;
@@ -294,7 +390,6 @@ public class ForegroundGuardService extends Service {
         NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm != null) nm.notify(NOTIF_ID, buildNotification(title, text));
     }
-
 
     private Notification buildNotification(String title, String text) {
         Intent open = new Intent(this, MainActivity.class);

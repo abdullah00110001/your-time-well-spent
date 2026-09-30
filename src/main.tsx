@@ -2,6 +2,9 @@ import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 import { Capacitor } from '@capacitor/core';
+import { installGlobalLogging } from './lib/logger';
+
+installGlobalLogging();
 
 // Global error handlers to prevent app crashes
 window.addEventListener("unhandledrejection", (event) => {

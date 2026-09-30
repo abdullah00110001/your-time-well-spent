@@ -1,5 +1,6 @@
 import { useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { log as logLocal } from '@/lib/logger';
 
 export interface LogEventInput {
   source: string;
@@ -17,6 +18,12 @@ const MUTE_MS = 5 * 60_000;
 const mutedUntil = new Map<string, number>();
 
 export async function logEvent(input: LogEventInput): Promise<void> {
+  // Always record locally first — instant, offline, no login needed.
+  logLocal(
+    input.severity === 'ERROR' || input.severity === 'CRITICAL' ? 'ERROR' : input.severity === 'WARN' ? 'WARN' : 'INFO',
+    input.source,
+    `[${input.severity}] ${input.reason}${input.matchedText ? ` — matched: "${input.matchedText}"` : ''}${input.contextLabel ? ` (context: ${input.contextLabel})` : ''}`,
+  );
   try {
     const { data: auth } = await supabase.auth.getUser();
     const userId = auth?.user?.id;

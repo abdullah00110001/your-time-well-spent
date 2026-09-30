@@ -144,6 +144,11 @@
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false" />
 
+        <receiver
+            android:name=".shield.core.ShieldLockScheduler"
+            android:enabled="true"
+            android:exported="false" />
+
         <!-- ================================================
         🔁 BOOT RECEIVER
         ================================================ -->
@@ -272,5 +277,14 @@
             android:exported="false"
             android:theme="@style/AppTheme.NoActionBar"
             android:screenOrientation="portrait" />
+        <activity
+            android:name="com.mylifeos.app.nighttorise.NightToRiseBlockActivity"
+            android:exported="false"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:theme="@style/AppTheme.SleepToRiseBlock" />
     </application>
 </manifest>

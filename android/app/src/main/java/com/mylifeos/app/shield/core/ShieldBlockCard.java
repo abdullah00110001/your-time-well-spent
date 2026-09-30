@@ -190,15 +190,6 @@ public final class ShieldBlockCard {
                     s.ringLabel = "remaining";
                     s.ringProgress = 1f;
                 }
-            } else if ("sleep".equals(kindExtra) || "rise".equals(kindExtra)) {
-                boolean rise = "rise".equals(kindExtra);
-                s.kind = Kind.APP;
-                s.title = rise ? "Rise first" : "Time to sleep";
-                s.sub = rise
-                    ? s.appName + " opens after your\nmorning guard ends."
-                    : s.appName + " is resting until morning.\nPut the phone down.";
-                s.chipIcon = ICON_CLOCK;
-                s.chipText = "Sleep to Rise · until " + SleepToRise.endLabel(app);
             } else {
                 s.kind = Kind.APP;
                 s.title = "Stay focused";
