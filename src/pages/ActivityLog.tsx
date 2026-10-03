@@ -7,7 +7,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { pruneActivityLog } from '@/hooks/useActivityLogger';
 import { ChevronLeft, ChevronRight, Download, Loader2, ScrollText, Activity } from 'lucide-react';
-import DeviceLogPanel from '@/components/logs/DeviceLogPanel';
 
 interface LogRow {
   id: string;
@@ -131,7 +130,6 @@ export default function ActivityLog() {
         )}
 
         {!activeSource && tab === 'device' ? (
-          <DeviceLogPanel />
         ) : loading && user ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
