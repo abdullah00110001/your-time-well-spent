@@ -191,8 +191,8 @@ export default function LandingPage() {
               </Link>
             </Button>
           </div>
-          <div className="relative mx-auto -mt-6 mb-10 h-[340px] sm:h-[440px] max-w-3xl cursor-grab active:cursor-grabbing touch-pan-y" aria-hidden="true">
-            <div className="absolute inset-0 rounded-full bg-primary/10 blur-3xl" />
+          <div className="relative mx-auto -mt-8 mb-8 h-[260px] sm:h-[380px] max-w-3xl cursor-grab active:cursor-grabbing touch-pan-y" aria-hidden="true">
+            <div className="absolute inset-0 m-auto h-48 w-48 sm:h-64 sm:w-64 rounded-full bg-primary/20 blur-3xl" />
             <HeroCore3D />
           </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto animate-fade-in">

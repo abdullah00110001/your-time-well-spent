@@ -1,4 +1,5 @@
 import { MarketingLayout } from '@/components/marketing/MarketingLayout';
+import { HoloDeviceStage } from '@/components/3d/HoloDeviceStage';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Link } from 'react-router-dom';
@@ -216,6 +217,7 @@ export default function Features() {
       title="Everything inside Life OS"
       subtitle="A complete operating system for your habits, focus, faith, and growth — engineered for the long game."
     >
+      <HoloDeviceStage />
       <div className="mx-auto max-w-6xl px-4 pb-24 space-y-20">
         {FEATURES.map((group) => (
           <section key={group.group}>
