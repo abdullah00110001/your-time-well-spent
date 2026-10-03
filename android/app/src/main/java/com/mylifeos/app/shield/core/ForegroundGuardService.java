@@ -351,6 +351,19 @@ public class ForegroundGuardService extends Service {
         String title;
         String text;
 
+        // The retired N2R manager always reports OFF. The scheduled Shield lock
+        // is the actual source of truth, not the merged Shield blocklist.
+        if (ShieldLockScheduler.isActive(this)) {
+            String kind = ShieldLockScheduler.activeKind(this);
+            long end = ShieldLockScheduler.activeEnd(this);
+            int count = ShieldLockScheduler.lockedAppCount(this);
+            title = "Sleep to Rise — " + ("rise".equals(kind) ? "Rise Guard" : "Sleep Guard") + " is on";
+            text = count + " app" + (count == 1 ? "" : "s") + " blocked by Sleep to Rise"
+                + (end > 0 ? " · until " + new SimpleDateFormat("h:mm a", Locale.getDefault()).format(new Date(end)) : "");
+            postStatus(title, text);
+            return;
+        }
+
         boolean locking = probe.shouldBlock;
         if (locking && !canEnforce) {
             title = "Sleep to Rise — permission needed";
@@ -383,6 +396,10 @@ public class ForegroundGuardService extends Service {
                 : "Lock is not enforcing right now";
         }
 
+        postStatus(title, text);
+    }
+
+    private void postStatus(String title, String text) {
         String signature = title + "|" + text;
         if (signature.equals(lastNotificationText)) return;
         lastNotificationText = signature;

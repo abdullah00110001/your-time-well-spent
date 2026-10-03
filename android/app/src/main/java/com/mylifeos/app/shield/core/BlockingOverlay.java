@@ -170,7 +170,80 @@ public final class BlockingOverlay {
     // Shield block card. Overlay tier 1 (accessibility) and tier 2 (system overlay).
     // ---------------------------------------------------------------------------
     private static final long CARD_FAILSAFE_MS = 30_000L;
+    private static final long NIGHT_CARD_DISPLAY_MS = 10_000L;
     private static final Handler cardHandler = new Handler(Looper.getMainLooper());
+
+    public static synchronized boolean showScheduledNightCard(
+        AccessibilityService service, boolean rise, String message, long endMs, Runnable onHome
+    ) {
+        return service != null && renderScheduledNightCard(service,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY, rise, message, endMs, onHome);
+    }
+
+    public static synchronized boolean showScheduledNightCardSystem(
+        Context ctx, boolean rise, String message, long endMs, Runnable onHome
+    ) {
+        if (ctx == null) return false;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(ctx)) return false;
+        } catch (Throwable t) { return false; }
+        int type = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+            ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY : WindowManager.LayoutParams.TYPE_PHONE;
+        return renderScheduledNightCard(ctx.getApplicationContext(), type, rise, message, endMs, onHome);
+    }
+
+    private static boolean renderScheduledNightCard(
+        Context ctx, int type, boolean rise, String message, long endMs, Runnable onHome
+    ) {
+        hide();
+        try {
+            WindowManager wm = (WindowManager) ctx.getSystemService(Context.WINDOW_SERVICE);
+            if (wm == null) return false;
+            NightToRiseBlockCard.Handles ui = NightToRiseBlockCard.build(ctx, rise);
+            ui.title.setText(rise ? "Rise with intention" : "Rest now");
+            ui.message.setText(message == null || message.isEmpty()
+                ? (rise ? "Screens stay closed a little longer." : "Time to rest. Put the phone down.") : message);
+            if (endMs > 0) ui.setEndTime(endMs);
+            ui.override.setVisibility(View.GONE);
+            ui.home.setOnClickListener(v -> {
+                hide();
+                if (onHome != null) onHome.run();
+            });
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT,
+                type, WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS, PixelFormat.TRANSLUCENT);
+            lp.gravity = Gravity.TOP | Gravity.START;
+            wm.addView(ui.root, lp);
+            activeView = ui.root;
+            activeWindowManager = wm;
+            final View shown = ui.root;
+            final Runnable[] update = new Runnable[1];
+            update[0] = () -> {
+                synchronized (BlockingOverlay.class) {
+                    if (activeView != shown) return;
+                    long seconds = Math.max(0, (endMs - System.currentTimeMillis()) / 1000);
+                    ui.countdown.setText(seconds / 3600 > 0
+                        ? String.format(java.util.Locale.US, "%d:%02d:%02d", seconds / 3600, (seconds % 3600) / 60, seconds % 60)
+                        : String.format(java.util.Locale.US, "%02d:%02d", seconds / 60, seconds % 60));
+                }
+                cardHandler.postDelayed(update[0], 1000);
+            };
+            update[0].run();
+            cardHandler.postDelayed(() -> {
+                synchronized (BlockingOverlay.class) {
+                    if (activeView != shown) return;
+                    hide();
+                }
+                if (onHome != null) onHome.run();
+            }, NIGHT_CARD_DISPLAY_MS);
+            return true;
+        } catch (Throwable t) {
+            com.mylifeos.app.LifeLog.w2("NightCard", "overlay failed", t);
+            hide();
+            return false;
+        }
+    }
 
     public static synchronized boolean showCard(
         AccessibilityService service, ShieldBlockCard.Spec spec, Runnable onHome

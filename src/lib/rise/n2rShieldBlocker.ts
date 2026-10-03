@@ -1,15 +1,15 @@
 /**
- * Sleep to Rise enforcement via the existing Shield blocking system.
- * No Sleep-to-Rise native code is used: during a lock window we hand Shield
- * a block list (user's own Shield apps + every installed non-allowed app),
- * and when the window ends we restore the user's original Shield list.
- * Shield's own block screen is shown for blocked apps.
+ * Sleep to Rise enforcement via Shield's native time-based lock.
+ * JS computes the next 7 nights' absolute lock windows and hands them to
+ * ShieldLockScheduler, which starts/ends blocking on time with AlarmManager —
+ * even when the app is fully closed or after a reboot.
  */
 import { Capacitor } from '@capacitor/core';
 import ShieldPlugin from '@/lib/capacitor/shieldPlugin';
+import { log } from '@/lib/logger';
 
 const USER_LIST_KEY = 'shield_blocked_apps_v2';
-const ACTIVE_KEY = 'n2r_shield_lock_active';
+const LEGACY_ACTIVE_KEY = 'n2r_shield_lock_active';
 
 // Never hand these to Shield, even if not in the allowed list.
 const NEVER_BLOCK = [
@@ -18,38 +18,56 @@ const NEVER_BLOCK = [
   'clock', 'phone', 'contacts', 'mms', 'messaging', 'safecenter',
 ];
 
+export interface LockWindow { start: number; end: number; kind: 'sleep' | 'rise' }
+
 const isNative = () => Capacitor.getPlatform() === 'android';
 
 function userList(): string[] {
   try { return JSON.parse(localStorage.getItem(USER_LIST_KEY) || '[]'); } catch { return []; }
 }
 
-export async function applyN2RLock(allowed: string[]): Promise<void> {
-  if (!isNative()) return;
+/** Restore the user's Shield list if an old in-app lock was left behind. */
+async function cleanupLegacy(): Promise<void> {
+  if (localStorage.getItem(LEGACY_ACTIVE_KEY) !== '1') return;
   try {
-    const self = (await import('@capacitor/app')).App;
-    const selfId = (await self.getInfo()).id;
+    await ShieldPlugin.blockApps({ apps: userList() });
+    localStorage.removeItem(LEGACY_ACTIVE_KEY);
+    log('INFO', 'N2R', 'legacy stuck lock cleaned, user list restored');
+  } catch (e) { log('WARN', 'N2R', 'legacy cleanup failed', e); }
+}
+
+let lastSig = '';
+
+export async function scheduleN2RLock(
+  allowed: string[], windows: LockWindow[], sleepMessage: string, riseMessage: string,
+): Promise<void> {
+  if (!isNative()) return;
+  await cleanupLegacy();
+  if (!windows.length) { await clearN2RLock(); return; }
+  const sig = JSON.stringify([allowed, windows, sleepMessage, riseMessage, userList()]);
+  if (sig === lastSig) return;
+  try {
+    const selfId = (await (await import('@capacitor/app')).App.getInfo()).id;
     const { apps } = await ShieldPlugin.getInstalledApps({ icons: false });
     const allow = new Set([...allowed, selfId]);
-    const lockList = apps
+    const lockApps = apps
       .map((a) => a.packageName)
       .filter((p) => !allow.has(p) && !NEVER_BLOCK.some((k) => p.toLowerCase().includes(k)));
-    const merged = Array.from(new Set([...userList(), ...lockList]));
-    await ShieldPlugin.blockApps({ apps: merged });
-    try { await ShieldPlugin.enable(); } catch { /* already on */ }
-    localStorage.setItem(ACTIVE_KEY, '1');
+    await ShieldPlugin.scheduleTimedLock({ lockApps, userApps: userList(), windows, sleepMessage, riseMessage });
+    lastSig = sig;
+    log('INFO', 'N2R', `scheduled ${windows.length} windows, ${lockApps.length} lock apps`);
   } catch (e) {
-    console.warn('[N2R→Shield] apply failed', e);
+    log('ERROR', 'N2R', 'schedule failed', e);
   }
 }
 
-export async function releaseN2RLock(): Promise<void> {
+export async function clearN2RLock(): Promise<void> {
   if (!isNative()) return;
-  if (localStorage.getItem(ACTIVE_KEY) !== '1') return;
+  await cleanupLegacy();
+  if (lastSig === 'cleared') return;
   try {
-    await ShieldPlugin.blockApps({ apps: userList() });
-    localStorage.removeItem(ACTIVE_KEY);
-  } catch (e) {
-    console.warn('[N2R→Shield] release failed', e);
-  }
+    await ShieldPlugin.clearTimedLock();
+    lastSig = 'cleared';
+    log('INFO', 'N2R', 'schedule cleared');
+  } catch (e) { log('WARN', 'N2R', 'clear failed', e); }
 }

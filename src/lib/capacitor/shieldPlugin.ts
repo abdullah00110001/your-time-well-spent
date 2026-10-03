@@ -25,6 +25,12 @@ export interface ShieldPluginInterface {
   blockKeywords(options: { keywords: string[] }): Promise<void>;
   getBlockedKeywords(): Promise<{ keywords: string[] }>;
   getInstalledApps(options?: { icons?: boolean }): Promise<{ apps: InstalledApp[] }>;
+  scheduleTimedLock(options: {
+    lockApps: string[]; userApps: string[];
+    windows: { start: number; end: number; kind: 'sleep' | 'rise' }[];
+    sleepMessage?: string; riseMessage?: string;
+  }): Promise<{ active: boolean }>;
+  clearTimedLock(): Promise<void>;
   getBlockStats(): Promise<{ blockedAttemptsToday: number }>;
 
   // ৩. মোড ম্যানেজমেন্ট

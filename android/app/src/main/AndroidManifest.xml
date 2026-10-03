@@ -66,6 +66,7 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
     <application
+        android:name=".LifeOSApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -247,6 +248,17 @@
                 <action android:name="android.app.action.DEVICE_ADMIN_DISABLE_REQUESTED" />
             </intent-filter>
         </receiver>
+
+        <!-- 🌙 Sleep to Rise lock screen (Java, editable) -->
+        <activity
+            android:name=".shield.NightToRiseLockScreen"
+            android:enabled="true"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:showWhenLocked="true"
+            android:theme="@style/AppTheme.NoActionBar" />
 
         <!-- 🚫 Shield Block Screen -->
         <activity

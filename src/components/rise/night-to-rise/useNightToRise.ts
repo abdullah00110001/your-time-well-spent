@@ -10,8 +10,8 @@ import {
   type PauseReason,
 } from './types';
 import { nightToRiseBridge } from '@/lib/capacitor/nightToRiseBridge';
-import { applyN2RLock, releaseN2RLock } from '@/lib/rise/n2rShieldBlocker';
-import { computeNightWindows, relevantAlarmOccurrenceMs } from './timeMath';
+import { scheduleN2RLock, clearN2RLock, type LockWindow } from '@/lib/rise/n2rShieldBlocker';
+import { computeNightWindows, relevantAlarmOccurrenceMs, forwardDelta } from './timeMath';
 import type { NextRiseAlarm } from './nextRiseAlarm';
 
 function load(): NightToRiseConfig {
@@ -161,12 +161,50 @@ export function useNightToRise(riseAlarm?: NextRiseAlarm | null) {
 
   const isLockEnforcing = status.phase === 'sleep-lock' || status.phase === 'rise-lock';
 
-  // Enforcement through Shield's blocking system (no Sleep-to-Rise native code).
+  // Native time-based enforcement: hand Shield the next 7 nights' absolute
+  // windows so blocking starts/ends on time even when the app is closed.
   const allowedKey = config.allowedApps.map((a) => a.id).join(',');
+  const lockWindows = useMemo<LockWindow[]>(() => {
+    if (!config.enabled || !config.configured) return [];
+    const out: LockWindow[] = [];
+    const pausedUntil = config.pausedUntil ? new Date(config.pausedUntil).getTime() : 0;
+    const riseDays = riseAlarm?.daysOfWeek ?? [];
+    const nowMs = Date.now();
+    for (let d = -1; d <= 7; d++) {
+      const base = new Date(now);
+      base.setHours(0, 0, 0, 0);
+      base.setDate(base.getDate() + d);
+      const day = base.getDay();
+      const scheduled = config.scheduleMode === 'everyday' ? true
+        : config.scheduleMode === 'weekdays' ? day >= 1 && day <= 5
+        : config.scheduleDays.includes(day);
+      if (!scheduled) continue;
+      const sStart = base.getTime() + windows.sleepStart * 60_000;
+      const sEnd = sStart + forwardDelta(windows.sleepStart, windows.sleepEnd) * 60_000;
+      if (config.sleepGuardEnabled !== false && sEnd > sStart) out.push({ start: sStart, end: sEnd, kind: 'sleep' });
+      if (windows.riseStart !== null && windows.riseEnd !== null && config.riseLockMinutesAfter > 0
+          && config.riseGuardEnabled !== false) {
+        const rStart = sStart + forwardDelta(windows.sleepStart, windows.riseStart) * 60_000;
+        const rDay = new Date(rStart).getDay();
+        if (riseDays.length === 0 || riseDays.includes(rDay)) {
+          out.push({ start: rStart, end: rStart + config.riseLockMinutesAfter * 60_000, kind: 'rise' });
+        }
+      }
+    }
+    return out.filter((w) => w.end > nowMs && w.start >= pausedUntil);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config.enabled, config.configured, config.pausedUntil, config.scheduleMode, config.scheduleDays,
+      config.sleepGuardEnabled, config.riseGuardEnabled, config.riseLockMinutesAfter,
+      windows.sleepStart, windows.sleepEnd, windows.riseStart, windows.riseEnd,
+      riseAlarm?.daysOfWeek, now.toDateString()]);
+  const windowsKey = JSON.stringify(lockWindows);
   useEffect(() => {
-    if (isLockEnforcing) void applyN2RLock(allowedKey ? allowedKey.split(',') : []);
-    else void releaseN2RLock();
-  }, [isLockEnforcing, allowedKey]);
+    if (lockWindows.length) {
+      void scheduleN2RLock(allowedKey ? allowedKey.split(',') : [], lockWindows,
+        config.sleepBlockMessage, config.riseBlockMessage);
+    } else void clearN2RLock();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [windowsKey, allowedKey, config.sleepBlockMessage, config.riseBlockMessage]);
 
   const canPauseTonight = useMemo(() => {
     if (strictLocked) return false;

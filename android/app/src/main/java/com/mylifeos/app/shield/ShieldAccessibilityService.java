@@ -154,6 +154,11 @@ public class ShieldAccessibilityService extends AccessibilityService {
         return svc != null && BlockingOverlay.show(svc, sleepToRise, rise, title, message, onHome);
     }
 
+    public static boolean showScheduledNightCard(boolean rise, String message, long endMs, Runnable onHome) {
+        ShieldAccessibilityService svc = instance;
+        return svc != null && BlockingOverlay.showScheduledNightCard(svc, rise, message, endMs, onHome);
+    }
+
     public static void dismissBlockingOverlay() { BlockingOverlay.hide(); }
 
     /** [SHIELD-CARD] Draws the shared Shield block card as an accessibility overlay. */

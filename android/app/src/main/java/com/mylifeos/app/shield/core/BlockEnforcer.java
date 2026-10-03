@@ -55,7 +55,7 @@ public final class BlockEnforcer {
      * otherwise every poll tick re-launches the block activity / re-posts the
      * full-screen notification, which looks exactly like the app crash-looping.
      */
-    private static final long SCREEN_DEDUPE_MS = 4000;
+    private static final long SCREEN_DEDUPE_MS = 10_000;
 
     /** Cooldown on "pull the user out of the app" so HOME is not spammed 1x/sec. */
     private static final long LEAVE_COOLDOWN_MS = 2500;
@@ -236,6 +236,37 @@ public final class BlockEnforcer {
             }
         } catch (Throwable t) {
             com.mylifeos.app.LifeLog.w2(TAG, "Sleep to Rise check failed", t);
+        }
+
+        // ---------- 1b. Sleep to Rise schedule lock (via Shield list) ----------
+        // An active guard owns the block screen for all apps in its lock set,
+        // including apps also on the user's Shield list. After the window,
+        // those apps use Shield's screen again.
+        try {
+            if (ShieldLockScheduler.isLockedByN2R(ctx, pkg)) {
+                if (allowScreen(pkg)) {
+                    String kind = ShieldLockScheduler.activeKind(ctx);
+                    Intent i = new Intent(ctx, com.mylifeos.app.shield.NightToRiseLockScreen.class);
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP
+                        | Intent.FLAG_ACTIVITY_EXCLUDE_FROM_RECENTS
+                        | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+                    i.putExtra(com.mylifeos.app.shield.NightToRiseLockScreen.EXTRA_KIND, kind);
+                    i.putExtra(com.mylifeos.app.shield.NightToRiseLockScreen.EXTRA_END_MS, ShieldLockScheduler.activeEnd(ctx));
+                    i.putExtra(com.mylifeos.app.shield.NightToRiseLockScreen.EXTRA_PACKAGE, pkg);
+                    i.putExtra(com.mylifeos.app.shield.NightToRiseLockScreen.EXTRA_MESSAGE, ShieldLockScheduler.message(ctx, kind));
+                    // launchBlockScreen reads the package from this extra for logging.
+                    i.putExtra(NightToRiseBlockActivity.EXTRA_PACKAGE, pkg);
+                    boolean rise = "rise".equals(kind);
+                    boolean shown = presentScheduledNightCard(ctx, i, kind, leaveApp);
+                    if (!shown) leave(leaveApp);
+                } else if (!isBlockScreenForeground()) {
+                    leave(leaveApp);
+                }
+                return new Result(true, true);
+            }
+        } catch (Throwable t) {
+            com.mylifeos.app.LifeLog.w2(TAG, "Sleep to Rise lock check failed", t);
         }
 
         // ---------- 2. Shield "Block Apps" list ----------
@@ -456,6 +487,34 @@ public final class BlockEnforcer {
             return true;
         }
         return showFullScreenFallback(ctx, i, title, body);
+    }
+
+    /** The Java card is drawn as an accessibility overlay first: ColorOS can
+     * silently discard background Activity launches without throwing. Never
+     * launch the Activity as well when the overlay was successfully drawn. */
+    private static boolean presentScheduledNightCard(Context ctx, Intent intent, String kind, Runnable leaveApp) {
+        if (!presentationBreakerAllows()) { leave(leaveApp); return false; }
+        if (!GlobalActionGovernor.allow(ctx, "present")) return false;
+        lastBlockAt = System.currentTimeMillis();
+        lastBlockedPkg = intent.getStringExtra(com.mylifeos.app.shield.NightToRiseLockScreen.EXTRA_PACKAGE);
+        boolean rise = "rise".equals(kind);
+        String message = intent.getStringExtra(com.mylifeos.app.shield.NightToRiseLockScreen.EXTRA_MESSAGE);
+        long end = intent.getLongExtra(com.mylifeos.app.shield.NightToRiseLockScreen.EXTRA_END_MS, 0L);
+        Runnable home = () -> leave(leaveApp);
+        if (com.mylifeos.app.shield.ShieldAccessibilityService.showScheduledNightCard(
+                rise, message, end, home)
+            || BlockingOverlay.showScheduledNightCardSystem(ctx, rise, message, end, home)) {
+            lastError = null;
+            com.mylifeos.app.LifeLog.i(TAG, "Sleep to Rise card shown for " + lastBlockedPkg);
+            return true;
+        }
+        // Only the fallback Activity is launched; no second full-screen surface.
+        if (com.mylifeos.app.shield.ShieldAccessibilityService.launchBlockActivity(intent)) return true;
+        if (canStartActivityFromBackground(ctx)) {
+            try { ctx.startActivity(intent); return true; }
+            catch (Throwable t) { com.mylifeos.app.LifeLog.w2(TAG, "Night card Activity rejected", t); }
+        }
+        return showFullScreenFallback(ctx, intent, "Sleep to Rise", rise ? "Rise Guard" : "Sleep Guard");
     }
 
     /** Android 14+ auto-revokes full-screen-intent for ordinary apps. */

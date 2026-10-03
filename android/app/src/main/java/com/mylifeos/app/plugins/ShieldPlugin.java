@@ -175,7 +175,8 @@ public class ShieldPlugin extends Plugin {
             JSArray lock = call.getArray("lockApps", new JSArray());
             JSArray user = call.getArray("userApps", new JSArray());
             JSArray windows = call.getArray("windows", new JSArray());
-            com.mylifeos.app.shield.core.ShieldLockScheduler.save(getContext(), lock, user, windows);
+            com.mylifeos.app.shield.core.ShieldLockScheduler.save(getContext(), lock, user, windows,
+                call.getString("sleepMessage", ""), call.getString("riseMessage", ""));
             JSObject ret = new JSObject();
             ret.put("active", com.mylifeos.app.shield.core.ShieldLockScheduler.isActive(getContext()));
             call.resolve(ret);
