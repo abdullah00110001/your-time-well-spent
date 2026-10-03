@@ -1,5 +1,5 @@
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, Lightformer, MeshTransmissionMaterial, Sparkles } from '@react-three/drei';
+import { Environment, Lightformer, Sparkles } from '@react-three/drei';
 import { useMemo, useRef } from 'react';
 import * as THREE from 'three';
 
@@ -61,30 +61,29 @@ function QuantumCore({ boost, pointer, lowPower }: CoreProps) {
         <meshStandardMaterial color={colors.primary} emissive={colors.primary} emissiveIntensity={2} toneMapped={false} />
       </mesh>
       <mesh>
-        <icosahedronGeometry args={[0.95, lowPower ? 1 : 4]} />
-        {lowPower ? (
-          <meshPhysicalMaterial transmission={0.9} roughness={0.1} thickness={0.6} ior={1.5} color="#ffffff" transparent opacity={0.6} />
-        ) : (
-          <MeshTransmissionMaterial
-            samples={4}
-            resolution={256}
-            transmission={0.95}
-            roughness={0.1}
-            ior={1.5}
-            thickness={0.6}
-            chromaticAberration={0.06}
-            anisotropy={0.2}
-            backside
-          />
-        )}
+        <sphereGeometry args={[0.85, 64, 64]} />
+        <meshPhysicalMaterial
+          color="#ffffff"
+          transmission={1}
+          roughness={0.05}
+          thickness={0.8}
+          ior={1.45}
+          clearcoat={1}
+          clearcoatRoughness={0.05}
+          iridescence={lowPower ? 0 : 0.6}
+          iridescenceIOR={1.3}
+          transparent
+          opacity={0.55}
+          envMapIntensity={1.5}
+        />
       </mesh>
       {rings.map((r, i) => (
         <mesh key={i} ref={r} rotation={[i * 0.9, i * 0.6, 0]}>
-          <torusGeometry args={[1.35 + i * 0.28, 0.025 + i * 0.006, 16, 128]} />
-          <meshStandardMaterial color={ringColors[i]} metalness={0.9} roughness={0.2} emissive={ringColors[i]} emissiveIntensity={0.5} />
+          <torusGeometry args={[1.3 + i * 0.22, 0.012, 12, 160]} />
+          <meshStandardMaterial color={ringColors[i]} metalness={1} roughness={0.15} emissive={ringColors[i]} emissiveIntensity={0.9} />
         </mesh>
       ))}
-      <Sparkles count={lowPower ? 30 : 90} scale={5} size={2} speed={0.4} color={colors.accent} />
+      <Sparkles count={lowPower ? 20 : 50} scale={4.5} size={1.5} speed={0.4} color={colors.accent} />
     </group>
   );
 }
@@ -110,7 +109,7 @@ export default function HeroCoreScene() {
     >
       <Canvas
         dpr={lowPower ? [0.85, 1] : [1, 1.75]}
-        camera={{ position: [0, 1.2, 5], fov: 45 }}
+        camera={{ position: [0, 0.6, 5.6], fov: 45 }}
         gl={{ antialias: !lowPower, alpha: true, powerPreference: 'high-performance' }}
         onCreated={({ camera }) => camera.lookAt(0, 0, 0)}
       >
