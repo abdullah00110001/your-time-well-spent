@@ -130,6 +130,7 @@ export default function ActivityLog() {
         )}
 
         {!activeSource && tab === 'device' ? (
+          <Card><CardContent className="p-6 text-center text-sm text-muted-foreground">Live device logs are available in the Android app.</CardContent></Card>
         ) : loading && user ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
