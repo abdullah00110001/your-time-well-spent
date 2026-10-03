@@ -10,6 +10,7 @@ import { isNative } from '@/lib/capacitor/platform';
 import { WhySection, FeatureDeepDive, HowItWorks, FaqSection } from '@/components/landing/LandingSections';
 import { LifeOSLogo } from '@/components/LifeOSLogo';
 import { LandingFooter } from '@/components/landing/LandingFooter';
+import { HeroCore3D } from '@/components/3d/HeroCore3D';
 
 export default function LandingPage() {
   const { user, loading } = useAuth();
@@ -190,6 +191,10 @@ export default function LandingPage() {
               </Link>
             </Button>
           </div>
+          <div className="relative mx-auto -mt-6 mb-10 h-[340px] sm:h-[440px] max-w-3xl cursor-grab active:cursor-grabbing touch-pan-y" aria-hidden="true">
+            <div className="absolute inset-0 rounded-full bg-primary/10 blur-3xl" />
+            <HeroCore3D />
+          </div>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto animate-fade-in">
             {stats.map((stat, index) => (
               <div key={stat.label} className="relative group" style={{ animationDelay: `${index * 100}ms` }}>
@@ -223,13 +228,29 @@ export default function LandingPage() {
           </div>
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             {features.map((feature, index) => (
-              <div key={feature.title} className="group relative" style={{ animationDelay: `${index * 80}ms` }}>
+              <div
+                key={feature.title}
+                className="group relative [perspective:900px]"
+                style={{ animationDelay: `${index * 80}ms` }}
+                onPointerMove={(e) => {
+                  const el = e.currentTarget.firstElementChild?.nextElementSibling as HTMLElement | null;
+                  if (!el) return;
+                  const r = e.currentTarget.getBoundingClientRect();
+                  const x = (e.clientX - r.left) / r.width - 0.5;
+                  const y = (e.clientY - r.top) / r.height - 0.5;
+                  el.style.transform = `rotateX(${-y * 12}deg) rotateY(${x * 12}deg)`;
+                }}
+                onPointerLeave={(e) => {
+                  const el = e.currentTarget.firstElementChild?.nextElementSibling as HTMLElement | null;
+                  if (el) el.style.transform = '';
+                }}
+              >
                 <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-accent/5 rounded-2xl blur-xl opacity-0 group-hover:opacity-100 transition-all duration-500" />
-                <div className="relative h-full rounded-2xl border border-border/50 bg-card/80 backdrop-blur-sm p-5 transition-all duration-300 hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 hover:-translate-y-1">
-                  <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br ${feature.gradient} border border-primary/20`}>
+                <div className="relative h-full rounded-2xl border border-border/50 bg-card/80 backdrop-blur-sm p-5 transition-[transform,border-color,box-shadow] duration-200 ease-out hover:border-primary/30 hover:shadow-xl hover:shadow-primary/5 [transform-style:preserve-3d]">
+                  <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br ${feature.gradient} border border-primary/20 transition-transform duration-300 group-hover:[transform:translateZ(40px)_scale(1.12)] group-hover:shadow-lg group-hover:shadow-primary/30`}>
                     <feature.icon className="h-6 w-6 text-primary" />
                   </div>
-                  <h3 className="mb-2 text-base font-semibold text-foreground">{feature.title}</h3>
+                  <h3 className="mb-2 text-base font-semibold text-foreground transition-transform duration-300 group-hover:[transform:translateZ(20px)]">{feature.title}</h3>
                   <p className="text-sm text-muted-foreground">{feature.description}</p>
                 </div>
               </div>
