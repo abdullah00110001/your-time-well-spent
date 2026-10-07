@@ -12,10 +12,10 @@
  */
 
 import { useNavigate } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ArrowLeft, Moon, Sunrise, Smartphone, MessageSquare, CalendarDays, X,
-  PauseCircle, ShieldCheck, Flame, Lock, BarChart3, Settings2, Sun, ChevronDown,
+  PauseCircle, ShieldCheck, Flame, Lock, BarChart3, Settings2, Sun, ChevronDown, MoreHorizontal,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -93,6 +93,8 @@ export default function NightToRisePage() {
   const [pauseReason, setPauseReason] = useState<PauseReason>('Other');
   const [strictDialog, setStrictDialog] = useState(false);
   const [chronoOpen, setChronoOpen] = useState(false);
+  const [sleepGoalHours, setSleepGoalHours] = useState(8);
+  const [sleepLatencyMinutes, setSleepLatencyMinutes] = useState(15);
 
   // Device-safety notice: native side turned Sleep to Rise off after detecting
   // a block-screen flood right before a restart.
@@ -152,21 +154,26 @@ export default function NightToRisePage() {
     }
   };
 
-  const summary = useMemo(() => {
-    if (status.phase === 'off') return 'Protection is off. Turn it on to guard tonight.';
-    if (status.phase === 'paused') return 'Paused for tonight — back tomorrow.';
-    if (status.phase === 'inactive-day') return 'Not scheduled tonight.';
-    if (status.phase === 'sleep-lock') return 'Sleep Guard is holding the line right now.';
-    if (status.phase === 'rise-lock') return 'Rise Guard is protecting your morning.';
-    return `Wind-down starts at ${formatClock(windows.sleepStart)}.`;
-  }, [status.phase, windows.sleepStart]);
+  const bedtimeMinutes = parseHM(config.shiftTargetTime ?? config.sleepTime);
+  const sleepOpportunity = riseAlarmTime
+    ? forwardDelta(bedtimeMinutes, parseHM(riseAlarmTime))
+    : null;
+  const estimatedSleep = sleepOpportunity == null ? null : Math.max(0, sleepOpportunity - sleepLatencyMinutes);
+  const goalBedtime = riseAlarmTime
+    ? (parseHM(riseAlarmTime) - sleepGoalHours * 60 - sleepLatencyMinutes + 1440) % 1440
+    : null;
+  const applyBedtime = (minutes: number) => {
+    if (strictLocked) return;
+    update({ sleepTime: `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`, shiftTargetTime: null });
+    toast.success('Bedtime updated', { description: formatClock(minutes) });
+  };
 
   return (
     <AppLayout hideMobileHeader>
       <div className="n2r min-h-screen pb-28" data-phase={status.phase}>
         {/* ---------------------------- Header ---------------------------- */}
         <div className="mx-auto max-w-2xl px-4 pt-4">
-          <Card className="n2r-surface rounded-[2rem] border px-4 pb-14 pt-4 shadow-sm">
+          <Card className="n2r-surface rounded-lg border p-4 shadow-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 items-center gap-2">
                 <Button
@@ -184,11 +191,11 @@ export default function NightToRisePage() {
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 <OfflineBadge />
                 <Button
-                  variant="ghost" size="icon" aria-label="Advanced settings"
+                  variant="ghost" size="icon" aria-label="More sleep settings" title="More sleep settings"
                   className="h-9 w-9 rounded-full"
                   onClick={() => setAdvancedOpen(true)}
                 >
-                  <Settings2 className="h-4 w-4" />
+                  <MoreHorizontal className="h-4 w-4" />
                 </Button>
                 <Switch
                   checked={config.enabled}
@@ -222,60 +229,7 @@ export default function NightToRisePage() {
           </Card>
         </div>
 
-        <div className="mx-auto max-w-2xl space-y-4 px-4">
-          {/* --------------------------- Today card -------------------------- */}
-          <Card className="n2r-surface relative z-10 -mt-8 mx-2 rounded-3xl shadow-lg">
-            <CardContent className="space-y-4 p-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p className="text-overline text-xs uppercase text-muted-foreground">Today</p>
-                  <p className="mt-1 text-sm">{summary}</p>
-                </div>
-                <div className="shrink-0 text-right">
-                  <p className="n2r-display text-4xl leading-none n2r-accent-text">{streak}</p>
-                  <p className="mt-1 flex items-center justify-end gap-1 text-[11px] text-muted-foreground">
-                    <Flame className="h-3 w-3 text-warning" /> night streak
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  size="sm" variant="outline" className="rounded-full"
-                  onClick={() => (strictLocked ? guarded(() => {})() : setPauseOpen(true))}
-                >
-                  <PauseCircle className="mr-1.5 h-3.5 w-3.5" />
-                  Pause tonight
-                </Button>
-                <Badge
-                  variant={config.strictMode ? 'default' : 'secondary'}
-                  className="cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  role="button" tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.preventDefault();
-                      setStrictDialog(true);
-                    }
-                  }}
-                  onClick={() => setStrictDialog(true)}
-                >
-                  <ShieldCheck className="mr-1 h-3 w-3" />
-                  {config.strictMode
-                    ? strictLocked ? `Strict · ${msToClock(strictLockRemainingMs)}` : 'Strict on'
-                    : 'Strict off'}
-                </Badge>
-                {config.enabled && <Badge variant="outline" className="rounded-full">Native blocking</Badge>}
-              </div>
-
-              {emergencyUnlockMsLeft != null && (
-                <div className="rounded-2xl border border-warning/40 bg-warning/10 p-3">
-                  <p className="text-xs text-muted-foreground">Emergency unlock in</p>
-                  <p className="n2r-mono text-lg font-semibold">{msToClock(emergencyUnlockMsLeft)}</p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
+        <div className="mx-auto mt-4 max-w-2xl space-y-4 px-4">
           <SleepCoachNotes
             config={config}
             update={update}
@@ -596,11 +550,57 @@ export default function NightToRisePage() {
         <Sheet open={advancedOpen} onOpenChange={setAdvancedOpen}>
           <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-md">
             <SheetHeader>
-              <SheetTitle>Advanced</SheetTitle>
-              <SheetDescription>Block screen wording and device permissions.</SheetDescription>
+              <SheetTitle>Sleep settings</SheetTitle>
+              <SheetDescription>Your sleep rhythm, bedtime suggestions and protection settings.</SheetDescription>
             </SheetHeader>
 
             <div className="mt-4 space-y-4">
+              <section aria-labelledby="sleep-cycle-title" className="space-y-4 border-b border-border pb-5">
+                <div>
+                  <h2 id="sleep-cycle-title" className="flex items-center gap-2 text-sm font-semibold"><Moon className="h-4 w-4" /> Sleep cycle &amp; bedtime</h2>
+                  <p className="mt-2 text-xs leading-relaxed text-muted-foreground">Sleep cycles vary through the night. Around 90 minutes is only an estimate, not a guarantee of waking refreshed. Most adults need 7–9 hours of sleep.</p>
+                </div>
+                <SliderRow label="Sleep goal" value={sleepGoalHours} min={7} max={9} step={0.5} unit="h" onChange={setSleepGoalHours} />
+                <SliderRow label="Time to fall asleep (estimate)" value={sleepLatencyMinutes} min={0} max={60} step={5} onChange={setSleepLatencyMinutes} />
+                {riseAlarmTime && goalBedtime != null ? (
+                  <>
+                    <dl className="space-y-2 text-sm">
+                      <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Rise alarm</dt><dd className="n2r-mono">{formatClock(parseHM(riseAlarmTime))}</dd></div>
+                      <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Time in bed</dt><dd className="n2r-mono">{formatGap(sleepOpportunity ?? 0)}</dd></div>
+                      <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Estimated sleep</dt><dd className="n2r-mono">{formatGap(estimatedSleep ?? 0)}</dd></div>
+                    </dl>
+                    <p className="text-xs leading-relaxed text-muted-foreground" role="status">{estimatedSleep != null && estimatedSleep < sleepGoalHours * 60
+                      ? `Your current bedtime leaves ${formatGap(sleepGoalHours * 60 - estimatedSleep)} less than your goal. Try ${formatClock(goalBedtime)} for more sleep opportunity.`
+                      : estimatedSleep != null && estimatedSleep > 540
+                        ? 'This schedule leaves more than 9 hours for sleep. Check your bedtime and next alarm; sleep needs vary.'
+                        : 'Your schedule leaves room for your sleep goal. Keep bedtime and wake time consistent.'}</p>
+                    <Button variant="outline" className="w-full" disabled={strictLocked} onClick={() => applyBedtime(goalBedtime)}>
+                      Use bedtime · {formatClock(goalBedtime)}
+                    </Button>
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium">Cycle-based estimates</p>
+                      {[5, 6].map((cycles) => {
+                        const minutes = (parseHM(riseAlarmTime) - cycles * 90 - sleepLatencyMinutes + 1440) % 1440;
+                        return <div key={cycles} className="flex items-center justify-between gap-3 border-b border-border py-2 last:border-0">
+                          <div className="min-w-0"><p className="text-sm">{cycles} cycles · {cycles * 1.5} h</p><p className="n2r-mono text-xs text-muted-foreground">Bedtime {formatClock(minutes)}</p></div>
+                          <Button size="sm" variant="ghost" disabled={strictLocked} aria-label={`Use ${cycles}-cycle bedtime`} onClick={() => applyBedtime(minutes)}>Use</Button>
+                        </div>;
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">Set a Rise alarm to calculate bedtime suggestions. A guard duration is not a sleep measurement.</p>
+                    <Button variant="outline" onClick={() => { setAdvancedOpen(false); navigate('/rise'); }}>Set a Rise alarm</Button>
+                  </div>
+                )}
+                <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
+                  <p>Allow a quiet wind-down before bed; avoid caffeine late in the day and get daylight after waking.</p>
+                  {config.weekendSleepTime && Math.min(forwardDelta(parseHM(config.sleepTime), parseHM(config.weekendSleepTime)), forwardDelta(parseHM(config.weekendSleepTime), parseHM(config.sleepTime))) > 60 && <p className="text-warning">Your weekend bedtime differs by more than an hour. Bringing it closer can help keep your rhythm steady.</p>}
+                  {config.chronotype === 'owl' && <p>For a later natural rhythm, move bedtime earlier gradually rather than making a large jump.</p>}
+                  <p>These are planning estimates, not measured sleep or medical advice. Goal and fall-asleep estimates reset when you leave this page; applying a bedtime saves it.</p>
+                </div>
+              </section>
               <Section icon={<MessageSquare className="h-4 w-4" />} title="Block Screen" subtitle="What the lock screen says">
                 <div className="space-y-3">
                   <div>
@@ -751,7 +751,7 @@ function Section({
   icon, title, subtitle, children,
 }: { icon: React.ReactNode; title: string; subtitle: string; children: React.ReactNode }) {
   return (
-    <Card className="n2r-surface rounded-3xl">
+    <Card className="n2r-surface rounded-lg">
       <CardHeader className="flex flex-row items-start gap-3 space-y-0 p-4 pb-3">
         <span className="n2r-accent-text flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-muted/60">{icon}</span>
         <div className="min-w-0 flex-1">
@@ -848,7 +848,7 @@ function StatTile({ icon, label, value, suffix = '', clock = false }: {
     return () => cancelAnimationFrame(frame);
   }, [value]);
   return (
-    <Card className="n2r-surface min-w-0 rounded-3xl">
+    <Card className="n2r-surface min-w-0 rounded-lg">
       <CardContent className="p-4">
         <span className="n2r-accent-text mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-muted/60">{icon}</span>
         <p className={cn('n2r-display n2r-accent-text min-h-9 break-words leading-9', clock ? 'text-xl' : 'text-3xl')} aria-label={value == null ? 'No data' : clock ? formatClock(value) : `${value}${suffix}`}>
