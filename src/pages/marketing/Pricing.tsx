@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Link } from 'react-router-dom';
 import { Zap, Star, Crown, Check, Clock } from 'lucide-react';
+import { PricingVaultStage } from '@/components/3d/PricingVaultStage';
 
 const PLANS = [
   {
@@ -49,6 +50,7 @@ export default function Pricing() {
   return (
     <MarketingLayout eyebrow="Simple pricing" title="Start free, upgrade when you're ready" subtitle="No hidden fees. Cancel anytime. 14-day refund, no questions asked.">
       <div className="mx-auto max-w-6xl px-4 pb-24">
+        <PricingVaultStage />
         {/* Plans */}
         <div className="grid md:grid-cols-3 gap-6 mb-16">
           {PLANS.map((p) => (
