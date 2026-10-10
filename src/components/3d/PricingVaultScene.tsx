@@ -99,12 +99,10 @@ function Sapphire({ hover, index, color }: CrystalProps & { color: THREE.Color }
 function Tesseract({ hover, index, color }: CrystalProps & { color: THREE.Color }) {
   const outer = useRef<THREE.Mesh>(null);
   const inner = useRef<THREE.Mesh>(null);
-  const dust = useRef(18);
   const speed = useRef(1);
   useFrame((state, raw) => {
     const dt = Math.min(raw, 0.05);
     const active = hover.current === index;
-    dust.current = active ? 40 : 18;
     speed.current += ((active ? 3.2 : 1) - speed.current) * (1 - Math.exp(-4 * dt));
     const s = speed.current * dt;
     if (outer.current) {
