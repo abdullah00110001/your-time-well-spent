@@ -11,9 +11,9 @@ interface VaultProps {
 
 function cssHsl(name: string, fallback: string) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  if (!raw) return new asTHREE.Color(fallback);
+  if (!raw) return new THREE.Color(fallback);
   const [h, s, l] = raw.replace(/%/g, '').split(/\s+/).map(Number);
-  return new asTHREE.Color().setHSL(h / 360, s / 100, l / 100);
+  return new THREE.Color().setHSL(h / 360, s / 100, l / 100);
 }
 
 /** Free: frosted quartz octahedron */
