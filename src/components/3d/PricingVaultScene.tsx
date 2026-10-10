@@ -16,12 +16,18 @@ function cssHsl(name: string, fallback: string) {
   return new THREE.Color().setHSL(h / 360, s / 100, l / 100);
 }
 
+interface CrystalProps {
+  hover: React.MutableRefObject<number>;
+  index: number;
+}
+
 /** Free: frosted quartz octahedron */
-function Quartz({ active }: { active: boolean }) {
+function Quartz({ hover, index }: CrystalProps) {
   const m = useRef<THREE.Mesh>(null);
   const speed = useRef(1);
   useFrame((state, raw) => {
     const dt = Math.min(raw, 0.05);
+    const active = hover.current === index;
     speed.current += ((active ? 3 : 1) - speed.current) * (1 - Math.exp(-4 * dt));
     if (m.current) {
       m.current.rotation.y += 0.25 * speed.current * dt;
@@ -46,12 +52,13 @@ function Quartz({ active }: { active: boolean }) {
 }
 
 /** Premium: blue sapphire gem with inner light */
-function Sapphire({ active, color }: { active: boolean; color: THREE.Color }) {
+function Sapphire({ hover, index, color }: CrystalProps & { color: THREE.Color }) {
   const m = useRef<THREE.Mesh>(null);
   const core = useRef<THREE.Mesh>(null);
   const speed = useRef(1);
   useFrame((state, raw) => {
     const dt = Math.min(raw, 0.05);
+    const active = hover.current === index;
     speed.current += ((active ? 3 : 1) - speed.current) * (1 - Math.exp(-4 * dt));
     if (m.current) {
       m.current.rotation.y += 0.35 * speed.current * dt;
@@ -89,12 +96,15 @@ function Sapphire({ active, color }: { active: boolean; color: THREE.Color }) {
 }
 
 /** Ultimate: rotating golden hypercube (nested wireframe boxes) + gold dust */
-function Tesseract({ active, color }: { active: boolean; color: THREE.Color }) {
+function Tesseract({ hover, index, color }: CrystalProps & { color: THREE.Color }) {
   const outer = useRef<THREE.Mesh>(null);
   const inner = useRef<THREE.Mesh>(null);
+  const dust = useRef(18);
   const speed = useRef(1);
   useFrame((state, raw) => {
     const dt = Math.min(raw, 0.05);
+    const active = hover.current === index;
+    dust.current = active ? 40 : 18;
     speed.current += ((active ? 3.2 : 1) - speed.current) * (1 - Math.exp(-4 * dt));
     const s = speed.current * dt;
     if (outer.current) {
