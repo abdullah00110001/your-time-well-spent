@@ -128,7 +128,7 @@ function Tesseract({ hover, index, color }: CrystalProps & { color: THREE.Color 
         <boxGeometry args={[0.55, 0.55, 0.55]} />
         <meshStandardMaterial color={color} metalness={1} roughness={0.15} emissive={color} emissiveIntensity={0.9} wireframe />
       </mesh>
-      <Sparkles count={active ? 40 : 18} scale={2.2} size={2} speed={active ? 1.2 : 0.5} color={color} />
+      <Sparkles count={24} scale={2.2} size={2} speed={0.7} color={color} />
     </group>
   );
 }
@@ -152,13 +152,13 @@ function Vaults({ pointer, hover, lowPower }: VaultProps) {
   return (
     <group ref={group}>
       <group position={[-2.3, 0, 0]}>
-        <Quartz active={hover.current === 0} />
+        <Quartz hover={hover} index={0} />
       </group>
       <group position={[0, 0.1, 0]}>
-        <Sapphire active={hover.current === 1} color={colors.accent} />
+        <Sapphire hover={hover} index={1} color={colors.accent} />
       </group>
       <group position={[2.3, 0, 0]}>
-        <Tesseract active={hover.current === 2} color={colors.primary} />
+        <Tesseract hover={hover} index={2} color={colors.primary} />
       </group>
       {!lowPower && <Sparkles count={24} scale={8} size={1} speed={0.25} color={colors.accent} position={[0, -0.4, -1]} />}
     </group>
