@@ -1,8 +1,7 @@
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Environment, Lightformer, Sparkles } from '@react-three/drei';
 import { useMemo, useRef } from 'react';
-import * as asTHREE from 'three';
-import type * as THREE from 'three';
+import * as THREE from 'three';
 
 interface VaultProps {
   pointer: React.MutableRefObject<{ x: number; y: number }>;
